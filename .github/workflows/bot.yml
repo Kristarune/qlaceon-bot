@@ -1,0 +1,38 @@
+name: Discord Bot 24/7
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "0 */5 * * *"
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 355
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Create env file
+        run: |
+          echo "${{ secrets.SACRED_ENV }}" > Sacred-Stuff.env
+
+      - name: Start bot
+        run: |
+          while true
+          do
+            node index.js
+            echo "Restarting bot..."
+            sleep 5
+          done
