@@ -1,3 +1,4 @@
+
 name: Discord Bot 24/7
 
 on:
@@ -26,13 +27,13 @@ jobs:
 
       - name: Create env file
         run: |
-          echo "${{ secrets.SACRED_ENV }}" > Sacred-Stuff.env
+          echo "${{ secrets.Sacred-Stuff }}" > Sacred-Stuff.env
 
       - name: Start bot
         run: |
           while true
           do
-            node index.js
-            echo "Restarting bot..."
+            node qarmander-bot.js
+            echo "Bot crashed. Restarting in 5 seconds..."
             sleep 5
           done
