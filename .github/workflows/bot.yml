@@ -1,5 +1,4 @@
 name: Qarmander Bot 24/7
-
 on:
   workflow_dispatch:
   schedule:
@@ -9,55 +8,19 @@ jobs:
   bot:
     runs-on: ubuntu-latest
     timeout-minutes: 355
-    
     steps:
       - uses: actions/checkout@v4
-      
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      
-      - name: Install dependencies
-        run: npm install discord.js
-      
-      - name: Create env file
+      - run: npm install discord.js
+      - name: Create .env file
         run: |
           echo "DISCORD_TOKEN=${{ secrets.DISCORD_TOKEN }}" > Sacred-Stuff.env
           echo "CLIENT_ID=${{ secrets.CLIENT_ID }}" >> Sacred-Stuff.env
-          echo "✅ Sacred-Stuff.env created"
-      
-      - name: Run bot 24/7 with auto-restart
+      - name: Debug env (safe)
         run: |
-          echo "╔════════════════════════════════════════════════════╗"
-          echo "║     🚀 QARMANDER BOT - 24/7 MODE ACTIVATED        ║"
-          echo "║     Iniciado en: $(date)                           ║"
-          echo "╚════════════════════════════════════════════════════╝"
-          
-          CONTADOR=0
-          
-          while true; do
-            CONTADOR=$((CONTADOR + 1))
-            echo ""
-            echo "════════════════════════════════════════════════════"
-            echo "🔄 CICLO #$CONTADOR - $(date)"
-            echo "════════════════════════════════════════════════════"
-            
-            # Ejecutar el bot
-            node qarmander-bot.js
-            
-            EXIT_CODE=$?
-            
-            echo ""
-            echo "────────────────────────────────────────────────────"
-            echo "⚠️ Bot terminó con código: $EXIT_CODE - $(date)"
-            echo "────────────────────────────────────────────────────"
-            
-            # Si el bot cerró normalmente (código 0)
-            if [ $EXIT_CODE -eq 0 ]; then
-              echo "✅ Bot cerró correctamente. Continuando..."
-            fi
-            
-            # Esperar antes de reiniciar
-            echo "🔄 Reiniciando en 5 segundos..."
-            sleep 5
-          done
+          echo "DISCORD_TOKEN length: $(grep -c 'DISCORD_TOKEN' Sacred-Stuff.env)"
+          echo "CLIENT_ID: $(grep 'CLIENT_ID' Sacred-Stuff.env | cut -d= -f2)"
+      - name: Run bot
+        run: node qarmander-bot.js
