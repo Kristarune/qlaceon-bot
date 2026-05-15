@@ -1,1 +1,220 @@
-[]
+[
+  {
+    "universeId": "6597877862",
+    "name": "[UPDATE] Secret Universe",
+    "channelId": "1503200072047788122",
+    "guildId": "1493304887252091061",
+    "lastUpdated": "2026-05-10T10:33:36.3682814Z",
+    "addedBy": "1343208613430300744",
+    "addedAt": "2026-05-11T01:27:09.706Z",
+    "subplaces": [
+      {
+        "placeId": 78039890222332,
+        "name": "Secret Meetup",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 137630300324059,
+        "name": "[UPDATE] Secret Universe",
+        "lastUpdated": null
+      }
+    ]
+  },
+  {
+    "universeId": "8292068736",
+    "name": "[Billie Eilish] The Block",
+    "channelId": "1503200072047788122",
+    "guildId": "1493304887252091061",
+    "lastUpdated": "2026-05-11T19:24:06.7958689Z",
+    "addedBy": "1343208613430300744",
+    "addedAt": "2026-05-11T01:27:39.732Z",
+    "subplaces": [
+      {
+        "placeId": 72995931205549,
+        "name": "Art Development",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 75405700483222,
+        "name": "Ana's Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 75833331956982,
+        "name": "Play Pals' Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 79368714145670,
+        "name": "The_Pr0fessor's Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 79427708581320,
+        "name": "VerseWonch's Other Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 81914282243912,
+        "name": "Sawhorse Eng Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 82079589082816,
+        "name": "FEELINGS Social Capture",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 84663621619610,
+        "name": "Jack's Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 84954092352098,
+        "name": "Whim's Branch (new) ",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 86543427237531,
+        "name": "Stratiz's Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 86880330683939,
+        "name": "Danz's Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 91060735415118,
+        "name": "Intykat's Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 91751877679930,
+        "name": "Available",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 94991053520125,
+        "name": "Michael's Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 95047916580305,
+        "name": "[Billie Eilish] The Block",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 95194685056009,
+        "name": "VerseWonch's Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 96043363819239,
+        "name": "Concert in a Box",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 107137522068455,
+        "name": "Fifo's Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 108353564663104,
+        "name": "BudgetFox's Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 108862151633853,
+        "name": "Staging",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 109263383287853,
+        "name": "Rule's Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 115138445008247,
+        "name": "OffGridDude",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 115699996123288,
+        "name": "Frederick's Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 120392838716850,
+        "name": "Sawhorse Art Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 124960103190791,
+        "name": "Will's Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 126596087415156,
+        "name": "Bacon's Other Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 131456775839122,
+        "name": "Available",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 134614543668802,
+        "name": "Marissa's Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 136300285822305,
+        "name": "FEELINGS",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 136505972636980,
+        "name": "Bacon's Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 137971952777311,
+        "name": "Michael's Other Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 138137777772420,
+        "name": "confi's Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 138349771708864,
+        "name": "Vexture's Branch",
+        "lastUpdated": null
+      },
+      {
+        "placeId": 140202562685639,
+        "name": "thunder1222's Branch",
+        "lastUpdated": null
+      }
+    ]
+  },
+  {
+    "universeId": "6806801785",
+    "name": "IN 1 MINUTE YOU WILL EXPLODE 💥",
+    "channelId": "1503200072047788122",
+    "guildId": "1493304887252091061",
+    "lastUpdated": "2026-05-09T10:30:07.385Z",
+    "addedBy": "1343208613430300744",
+    "addedAt": "2026-05-11T20:19:17.281Z",
+    "subplaces": [
+      {
+        "placeId": 83033835862544,
+        "name": "IN 1 MINUTE YOU WILL EXPLODE 💥",
+        "lastUpdated": null
+      }
+    ]
+  }
+]
