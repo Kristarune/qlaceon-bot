@@ -549,7 +549,7 @@ client.on('interactionCreate', async i => {
                 if (originalPlaceId) e.addFields({ name: 'Original Place ID', value: `\`${originalPlaceId}\``, inline: true });
                 await i.editReply({ embeds: [e] });
 
-                // Notify owners (optional)
+                // Notify owners
                 for (const ownerId of BOT_ADMINS) {
                     const owner = await client.users.fetch(ownerId).catch(() => null);
                     if (owner) {
@@ -570,13 +570,8 @@ client.on('interactionCreate', async i => {
                 const pending = requests.filter(r => r.status === 'pending');
 
                 if (action === 'list') {
-                    if (!pending.length) {
-                        e.setTitle('📋 Game Requests').setDescription('No pending requests.').setColor(0x06b6d4);
-                    } else {
-                        e.setTitle(`📋 Pending Requests (${pending.length})`)
-                            .setDescription(pending.map(r => `**ID:** \`${r.id}\` | **${r.name}** (Universe: \`${r.universeId}\`)\nRequested by: <@${r.requestedBy}> at ${new Date(r.requestedAt).toLocaleString()}`).join('\n\n'))
-                            .setColor(0x06b6d4);
-                    }
+                    if (!pending.length) e.setTitle('📋 Game Requests').setDescription('No pending requests.').setColor(0x06b6d4);
+                    else e.setTitle(`📋 Pending Requests (${pending.length})`).setDescription(pending.map(r => `**ID:** \`${r.id}\` | **${r.name}** (Universe: \`${r.universeId}\`)\nRequested by: <@${r.requestedBy}> at ${new Date(r.requestedAt).toLocaleString()}`).join('\n\n')).setColor(0x06b6d4);
                     await i.editReply({ embeds: [e] });
                     break;
                 }
@@ -586,14 +581,10 @@ client.on('interactionCreate', async i => {
                         await i.editReply({ embeds: [e.setTitle('📋 No Requests').setDescription('There are no pending game requests.')] });
                         break;
                     }
-                    // Create embed with first request and buttons
                     let currentIndex = 0;
                     const generateBrowseEmbed = (idx) => {
                         const req = pending[idx];
-                        const embed = new EmbedBuilder()
-                            .setTitle(`📨 Game Request ${idx+1}/${pending.length}`)
-                            .setDescription(`**Game:** ${req.name}\n**Universe ID:** \`${req.universeId}\`\n**Request ID:** \`${req.id}\`\n**Requested by:** <@${req.requestedBy}>\n**Requested at:** ${new Date(req.requestedAt).toLocaleString()}`)
-                            .setColor(0x06b6d4);
+                        const embed = new EmbedBuilder().setTitle(`📨 Game Request ${idx+1}/${pending.length}`).setDescription(`**Game:** ${req.name}\n**Universe ID:** \`${req.universeId}\`\n**Request ID:** \`${req.id}\`\n**Requested by:** <@${req.requestedBy}>\n**Requested at:** ${new Date(req.requestedAt).toLocaleString()}`).setColor(0x06b6d4);
                         if (req.placeId) embed.addFields({ name: 'Original Place ID', value: `\`${req.placeId}\``, inline: true });
                         return embed;
                     };
@@ -607,51 +598,43 @@ client.on('interactionCreate', async i => {
 
                     const collector = i.channel.createMessageComponentCollector({ filter: btn => btn.user.id === i.user.id, time: 120000 });
                     collector.on('collect', async btn => {
-                        if (btn.customId === 'prev_req') currentIndex = (currentIndex - 1 + pending.length) % pending.length;
-                        else if (btn.customId === 'next_req') currentIndex = (currentIndex + 1) % pending.length;
-                        else if (btn.customId === 'approve_req') {
+                        if (btn.customId === 'prev_req') {
+                            currentIndex = (currentIndex - 1 + pending.length) % pending.length;
+                            await btn.update({ embeds: [generateBrowseEmbed(currentIndex)], components: [row] });
+                        } else if (btn.customId === 'next_req') {
+                            currentIndex = (currentIndex + 1) % pending.length;
+                            await btn.update({ embeds: [generateBrowseEmbed(currentIndex)], components: [row] });
+                        } else if (btn.customId === 'approve_req') {
                             const req = pending[currentIndex];
-                            // Approve: add to watched list
                             const watched = loadWatched();
                             if (!watched.some(w => w.universeId === req.universeId)) {
                                 const game = await getGameInfo(req.universeId);
                                 if (game) {
                                     const subplaces = await getSubplaces(req.universeId);
                                     const newEntry = {
-                                        universeId: req.universeId,
-                                        name: game.name,
-                                        channelId: i.channelId,
-                                        guildId: i.guildId,
-                                        lastUpdated: game.updated,
-                                        addedBy: i.user.id,
-                                        addedAt: new Date().toISOString(),
+                                        universeId: req.universeId, name: game.name, channelId: i.channelId, guildId: i.guildId,
+                                        lastUpdated: game.updated, addedBy: i.user.id, addedAt: new Date().toISOString(),
                                         subplaces: subplaces.map(sp => ({ placeId: sp.placeId, name: sp.name, lastUpdated: sp.updated }))
                                     };
                                     watched.push(newEntry);
                                     saveWatched(watched);
                                 }
                             }
-                            // Update request status
                             req.status = 'approved';
                             saveRequests(requests);
                             await btn.update({ embeds: [new EmbedBuilder().setColor(0x10b981).setTitle('✅ Request Approved').setDescription(`**${req.name}** has been added to the watch list.`)], components: [] });
                             collector.stop();
-                            break;
+                            return;
                         } else if (btn.customId === 'reject_req') {
                             const req = pending[currentIndex];
                             req.status = 'rejected';
                             saveRequests(requests);
                             await btn.update({ embeds: [new EmbedBuilder().setColor(0xef4444).setTitle('❌ Request Rejected').setDescription(`**${req.name}** has been rejected.`)], components: [] });
                             collector.stop();
-                            break;
-                        }
-                        if (btn.customId === 'prev_req' || btn.customId === 'next_req') {
-                            await btn.update({ embeds: [generateBrowseEmbed(currentIndex)], components: [row] });
+                            return;
                         }
                     });
-                    collector.on('end', () => {
-                        i.editReply({ components: [] }).catch(() => {});
-                    });
+                    collector.on('end', () => { i.editReply({ components: [] }).catch(() => {}); });
                     break;
                 }
 
@@ -662,20 +645,14 @@ client.on('interactionCreate', async i => {
                         await i.editReply({ embeds: [e.setTitle('❌ Not Found').setDescription(`No pending request with ID \`${reqId}\`.`)] });
                         break;
                     }
-                    // Add to watched
                     const watched = loadWatched();
                     if (!watched.some(w => w.universeId === request.universeId)) {
                         const game = await getGameInfo(request.universeId);
                         if (game) {
                             const subplaces = await getSubplaces(request.universeId);
                             const newEntry = {
-                                universeId: request.universeId,
-                                name: game.name,
-                                channelId: i.channelId,
-                                guildId: i.guildId,
-                                lastUpdated: game.updated,
-                                addedBy: i.user.id,
-                                addedAt: new Date().toISOString(),
+                                universeId: request.universeId, name: game.name, channelId: i.channelId, guildId: i.guildId,
+                                lastUpdated: game.updated, addedBy: i.user.id, addedAt: new Date().toISOString(),
                                 subplaces: subplaces.map(sp => ({ placeId: sp.placeId, name: sp.name, lastUpdated: sp.updated }))
                             };
                             watched.push(newEntry);
@@ -686,11 +663,8 @@ client.on('interactionCreate', async i => {
                     saveRequests(requests);
                     e.setTitle('✅ Request Approved').setDescription(`**${request.name}** has been added to the watch list.`).setColor(0x10b981);
                     await i.editReply({ embeds: [e] });
-                    // Notify requester
                     const requester = await client.users.fetch(request.requestedBy).catch(() => null);
-                    if (requester) {
-                        requester.send({ embeds: [new EmbedBuilder().setColor(0x10b981).setTitle('✅ Your game request was approved!').setDescription(`**${request.name}** is now being monitored.`)] }).catch(() => {});
-                    }
+                    if (requester) requester.send({ embeds: [new EmbedBuilder().setColor(0x10b981).setTitle('✅ Your game request was approved!').setDescription(`**${request.name}** is now being monitored.`)] }).catch(() => {});
                     break;
                 }
 
@@ -705,28 +679,253 @@ client.on('interactionCreate', async i => {
                     saveRequests(requests);
                     e.setTitle('❌ Request Rejected').setDescription(`**${request.name}** has been rejected.`).setColor(0xef4444);
                     await i.editReply({ embeds: [e] });
-                    // Notify requester
                     const requester = await client.users.fetch(request.requestedBy).catch(() => null);
-                    if (requester) {
-                        requester.send({ embeds: [new EmbedBuilder().setColor(0xef4444).setTitle('❌ Your game request was rejected').setDescription(`**${request.name}** was not approved.`) ] }).catch(() => {});
-                    }
+                    if (requester) requester.send({ embeds: [new EmbedBuilder().setColor(0xef4444).setTitle('❌ Your game request was rejected').setDescription(`**${request.name}** was not approved.`)] }).catch(() => {});
                     break;
                 }
                 break;
             }
 
-            // ── Existing commands (help, whitelist_server, whitelist_game, subplaces, brute_link, robloxgame, robloxuser, all ciphers, botstats, menu) ──
-            // ... (copy from the previous full code, exactly as in the earlier message, up to the end of the switch)
-            // To avoid duplication, I'm keeping the same content from the previous `switch` after the new cases.
-            // In practice, you would paste the entire switch block from the earlier full code here.
-            // For brevity, I'll include the rest from the previous version (the one without request_game) but I need to ensure it's complete.
+            // ====================== HELP ======================
+            case 'help':
+                e.setTitle('🔐 Qarmander Commands').setDescription(
+                    `**Total Commands: ${commands.length}**\n\n` +
+                    `🎮 **Roblox:** /brute_link, /robloxgame, /robloxuser, /subplaces\n` +
+                    `📺 **Watcher:** /whitelist_game (admin only)\n` +
+                    `📨 **Requests:** /request_game (everyone) | /manage_requests (owners)\n` +
+                    `🔐 **Admin:** /whitelist_server\n` +
+                    `🔄 **Basic:** /rot13, /rot47, /atbash, /reverse, /xor\n` +
+                    `💻 **Encoding:** /base64, /bin, /hex, /octal, /ascii, /morse\n` +
+                    `🔒 **Hashing:** /md5, /sha1, /sha256, /sha512\n` +
+                    `🔑 **Ciphers:** /caesar, /vigenere, /beaufort, /affine, /gronsfeld, /autokey\n` +
+                    `🚂 **Transposition:** /railfence, /scytale, /columnar, /polybius\n` +
+                    `📡 **Classic:** /baconian, /nato, /braille, /t9, /phone, /tapcode\n` +
+                    `🌐 **Web:** /urlencode, /urldecode, /htmlencode, /htmldecode\n` +
+                    `🎛️ **Other:** /menu, /botstats`
+                );
+                break;
 
-            // For the sake of this response, I'll assume you already have the previous full switch block (from help to menu) and just need to merge. I'll provide the full final file as a single paste.
+            // ====================== WHITELIST_SERVER ======================
+            case 'whitelist_server':
+                if (!BOT_ADMINS.includes(i.user.id)) {
+                    await i.editReply({ embeds: [e.setTitle('❌ Access Denied').setDescription('Only spanishrobey & gasheper can use this.')] });
+                    break;
+                }
+                const actionWS = i.options.getString('action');
+                const guildId = i.options.getString('guild_id').trim();
+                if (actionWS === 'remove' && HARDCODED_GUILDS.includes(guildId)) {
+                    await i.editReply({ embeds: [e.setTitle('⚠️ Protected').setDescription('Cannot remove hardcoded guild.')] });
+                    break;
+                }
+                const dynamic = loadGuilds();
+                if (actionWS === 'add') {
+                    if (dynamic.includes(guildId) || HARDCODED_GUILDS.includes(guildId)) {
+                        await i.editReply({ embeds: [e.setTitle('ℹ️ Already whitelisted')] });
+                    } else {
+                        dynamic.push(guildId);
+                        saveGuilds(dynamic);
+                        e.setTitle('✅ Server Whitelisted').setDescription(`Added \`${guildId}\``).setColor(0x10b981).addFields({ name:'Added by', value:`<@${i.user.id}>`, inline:true });
+                        await i.editReply({ embeds: [e] });
+                    }
+                } else {
+                    const idx = dynamic.indexOf(guildId);
+                    if (idx === -1) {
+                        await i.editReply({ embeds: [e.setTitle('❌ Not found')] });
+                    } else {
+                        dynamic.splice(idx,1);
+                        saveGuilds(dynamic);
+                        e.setTitle('🗑️ Removed').setDescription(`Removed \`${guildId}\``).setColor(0xef4444);
+                        await i.editReply({ embeds: [e] });
+                    }
+                }
+                break;
 
-// ====================== REST OF THE EXISTING COMMANDS ======================
-// (The following is the same switch content as in the previous full code, from 'help' down to 'menu')
-// To save space, I'll indicate that you should copy the remaining cases from the earlier full code.
-// In a real implementation, I would include them. Since the user asked for the complete code with requests, I'll provide the full merged file below.
+            // ====================== WHITELIST_GAME ======================
+            case 'whitelist_game':
+                if (!BOT_ADMINS.includes(i.user.id)) {
+                    await i.editReply({ embeds: [e.setTitle('❌ Access Denied').setDescription('Only spanishrobey & gasheper can manage games.')] });
+                    break;
+                }
+                const actWG = i.options.getString('action');
+                const watched = loadWatched();
+                if (actWG === 'list') {
+                    if (!watched.length) e.setTitle('📺 Watched Games').setDescription('No games being watched.');
+                    else e.setTitle('📺 Watched Games').setDescription(watched.map((w,i)=>`**${i+1}. ${w.name||w.universeId}**\nUniverse: \`${w.universeId}\`\nChannel: <#${w.channelId}>\nSubplaces: ${w.subplaces?.length??0}\nAdded by: <@${w.addedBy}>`).join('\n\n')).setColor(0x06b6d4);
+                    await i.editReply({ embeds: [e] });
+                    break;
+                }
+                const universeIdWG = i.options.getString('universe_id')?.trim();
+                if (!universeIdWG) {
+                    await i.editReply({ embeds: [e.setTitle('❌ Missing universe_id')] });
+                    break;
+                }
+                if (actWG === 'change_channel') {
+                    const newChan = i.options.getString('channel')?.trim();
+                    if (!newChan) { await i.editReply({ embeds: [e.setTitle('❌ Missing channel')] }); break; }
+                    const entry = watched.find(w => w.universeId === universeIdWG);
+                    if (!entry) { await i.editReply({ embeds: [e.setTitle('❌ Not watched')] }); break; }
+                    const old = entry.channelId;
+                    entry.channelId = newChan;
+                    saveWatched(watched);
+                    e.setTitle('🔄 Channel Updated').setDescription(`**${entry.name||universeIdWG}** now alerts in <#${newChan}>`).addFields({ name:'Old', value:`<#${old}>`, inline:true }, { name:'New', value:`<#${newChan}>`, inline:true });
+                    await i.editReply({ embeds: [e] });
+                    break;
+                }
+                if (actWG === 'remove') {
+                    const idx = watched.findIndex(w => w.universeId === universeIdWG);
+                    if (idx === -1) { await i.editReply({ embeds: [e.setTitle('❌ Not found')] }); break; }
+                    const removed = watched.splice(idx,1)[0];
+                    saveWatched(watched);
+                    e.setTitle('🗑️ Game Unwatched').setDescription(`**${removed.name||universeIdWG}** removed.`);
+                    await i.editReply({ embeds: [e] });
+                    break;
+                }
+                if (actWG === 'add') {
+                    const channelId = i.options.getString('channel')?.trim() || i.channelId;
+                    if (watched.find(w => w.universeId === universeIdWG)) {
+                        await i.editReply({ embeds: [e.setTitle('ℹ️ Already watching')] });
+                        break;
+                    }
+                    e.setTitle('⏳ Fetching...');
+                    await i.editReply({ embeds: [e] });
+                    const game = await getGameInfo(universeIdWG);
+                    if (!game) {
+                        await i.editReply({ embeds: [e.setTitle('❌ Game not found')] });
+                        break;
+                    }
+                    const subplaces = await getSubplaces(universeIdWG);
+                    const newEntry = {
+                        universeId: universeIdWG, name: game.name, channelId, guildId: i.guildId,
+                        lastUpdated: game.updated, addedBy: i.user.id, addedAt: new Date().toISOString(),
+                        subplaces: subplaces.map(sp => ({ placeId: sp.placeId, name: sp.name, lastUpdated: sp.updated }))
+                    };
+                    watched.push(newEntry);
+                    saveWatched(watched);
+                    e.setTitle('✅ Game Added').setDescription(`Now watching **${game.name}**`).setColor(0x10b981)
+                        .setThumbnail(`https://www.roblox.com/asset-thumbnail/image?assetId=${game.rootPlaceId}&width=512&height=512&format=png`)
+                        .addFields({ name:'Universe', value:`\`${universeIdWG}\``, inline:true }, { name:'Channel', value:`<#${channelId}>`, inline:true }, { name:'Subplaces', value:`${subplaces.length}`, inline:true });
+                    await i.editReply({ embeds: [e] });
+                }
+                break;
+
+            // ====================== SUBPLACES ======================
+            case 'subplaces':
+                const uid = i.options.getString('universe_id').trim();
+                e.setTitle('⏳ Fetching...');
+                await i.editReply({ embeds: [e] });
+                const [gameSub, subs] = await Promise.all([getGameInfo(uid), getSubplaces(uid)]);
+                if (!gameSub) { await i.editReply({ embeds: [e.setTitle('❌ Not found')] }); break; }
+                e.setTitle(`📦 Subplaces — ${gameSub.name}`).setColor(0x06b6d4).setURL(`https://www.roblox.com/games/${gameSub.rootPlaceId}`)
+                    .setThumbnail(`https://www.roblox.com/asset-thumbnail/image?assetId=${gameSub.rootPlaceId}&width=512&height=512&format=png`)
+                    .addFields({ name:'Universe ID', value:`\`${uid}\``, inline:true }, { name:'Total', value:`${subs.length}`, inline:true });
+                if (subs.length) e.setDescription(subs.map((sp,i)=>`**${i+1}.** ${sp.name}\nPlace ID: \`${sp.placeId}\`\nUpdated: ${sp.updated??'Unknown'}\n[Open](https://www.roblox.com/games/${sp.placeId})`).join('\n\n').slice(0,4000));
+                else e.setDescription('No subplaces found (may require authentication).');
+                await i.editReply({ embeds: [e] });
+                break;
+
+            // ====================== BRUTE_LINK ======================
+            case 'brute_link':
+                const id = i.options.getString('id');
+                e.setTitle(`🔍 Scanning ID: ${id}`).setDescription('Checking endpoints...');
+                await i.editReply({ embeds: [e] });
+                const results = await bruteForceRoblox(id);
+                const good = Object.entries(results).filter(([,v])=>v.success);
+                e.setTitle(`🔗 Bruteforce — ${id}`).setColor(good.length ? 0x10b981 : 0xef4444)
+                    .setDescription(`✅ ${good.length} endpoints found\n${good.slice(0,10).map(([n,d])=>`**${n}**: ${d.data?.name || d.data?.data?.[0]?.name || 'Found'}`).join('\n')}`);
+                if (good.length) e.addFields({ name:'❌ Failed', value:Object.entries(results).filter(([,v])=>!v.success).map(([n,d])=>`• ${n} (${d.status || d.error || 'error'})`).join('\n').slice(0,1000) });
+                break;
+
+            // ====================== ROBLOXGAME ======================
+            case 'robloxgame':
+                const g = await getGameInfo(i.options.getString('id'));
+                if (g) e.setTitle(`🎮 ${g.name}`).setURL(`https://www.roblox.com/games/${g.rootPlaceId}`).setThumbnail(`https://www.roblox.com/asset-thumbnail/image?assetId=${g.rootPlaceId}&width=512&height=512&format=png`).addFields({name:'Playing', value:`${g.playing?.toLocaleString()??'N/A'}`, inline:true},{name:'Visits', value:`${g.visits?.toLocaleString()??'N/A'}`, inline:true},{name:'Creator', value:g.creator?.name??'Unknown', inline:true},{name:'Universe ID', value:`\`${g.id}\``, inline:true},{name:'Place ID', value:`\`${g.rootPlaceId}\``, inline:true},{name:'Updated', value:g.updated??'Unknown', inline:true});
+                else e.setTitle('❌ Not found');
+                break;
+
+            // ====================== ROBLOXUSER ======================
+            case 'robloxuser':
+                const u = await getRobloxUser(i.options.getString('username'));
+                if (u) e.setTitle(`👤 ${u.name}`).setDescription(`ID: ${u.id}\nDisplay: ${u.displayName}`);
+                else e.setTitle('❌ Not found');
+                break;
+
+            // ====================== CIPHER CASES ======================
+            case 'rot13': e.setTitle('ROT13').setDescription(`\`${snip(rot13(i.options.getString('text')))}\``); break;
+            case 'rot47': e.setTitle('ROT47').setDescription(`\`${snip(rot47(i.options.getString('text')))}\``); break;
+            case 'atbash': e.setTitle('Atbash').setDescription(`\`${snip(atbash(i.options.getString('text')))}\``); break;
+            case 'base64': e.setTitle('Base64').setDescription(`\`${snip(base64e(i.options.getString('text')))}\``); break;
+            case 'base64d': e.setTitle('Base64 Decode').setDescription(`\`${snip(base64d(i.options.getString('text')))}\``); break;
+            case 'reverse': e.setTitle('Reverse').setDescription(`\`${snip(reverse(i.options.getString('text')))}\``); break;
+            case 'bin': e.setTitle('Binary').setDescription(`\`${snip(textToBin(i.options.getString('text')))}\``); break;
+            case 'bindecode': e.setTitle('Binary Decode').setDescription(`\`${snip(binToText(i.options.getString('binary')))}\``); break;
+            case 'hex': e.setTitle('Hex').setDescription(`\`${snip(textToHex(i.options.getString('text')))}\``); break;
+            case 'hexdecode': e.setTitle('Hex Decode').setDescription(`\`${snip(hexToText(i.options.getString('hex')))}\``); break;
+            case 'octal': e.setTitle('Octal').setDescription(`\`${snip(textToOctal(i.options.getString('text')))}\``); break;
+            case 'octaldecode': e.setTitle('Octal Decode').setDescription(`\`${snip(octalToText(i.options.getString('octal')))}\``); break;
+            case 'ascii': e.setTitle('ASCII').setDescription(`\`${snip(textToAscii(i.options.getString('text')))}\``); break;
+            case 'asciidecode': e.setTitle('ASCII Decode').setDescription(`\`${snip(asciiToText(i.options.getString('codes')))}\``); break;
+            case 'md5': e.setTitle('MD5').setDescription(`\`${md5(i.options.getString('text'))}\``); break;
+            case 'sha1': e.setTitle('SHA-1').setDescription(`\`${sha1(i.options.getString('text'))}\``); break;
+            case 'sha256': e.setTitle('SHA-256').setDescription(`\`${sha256(i.options.getString('text'))}\``); break;
+            case 'sha512': e.setTitle('SHA-512').setDescription(`\`${sha512(i.options.getString('text'))}\``); break;
+            case 'morse': e.setTitle('Morse').setDescription(`\`${snip(textToMorse(i.options.getString('text')))}\``); break;
+            case 'morsedecode': e.setTitle('Morse Decode').setDescription(`\`${snip(morseToText(i.options.getString('morse')))}\``); break;
+            case 'caesar': { const s = i.options.getInteger('shift') ?? 3; e.setTitle(`Caesar (shift ${s})`).setDescription(`\`${snip(caesar(i.options.getString('text'), s))}\``); break; }
+            case 'caesarbf': e.setTitle('Caesar Brute').setDescription(`\`\`\`${snip(caesarBrute(i.options.getString('text')),1900)}\`\`\``); break;
+            case 'vigenere': e.setTitle('Vigenère Encode').setDescription(`\`${snip(vigenereEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+            case 'vigdecode': e.setTitle('Vigenère Decode').setDescription(`\`${snip(vigenereDecode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+            case 'beaufort': e.setTitle('Beaufort').setDescription(`\`${snip(beaufort(i.options.getString('text'), i.options.getString('key')))}\``); break;
+            case 'affine': e.setTitle('Affine Encode').setDescription(`\`${snip(affineEncode(i.options.getString('text'), i.options.getInteger('a'), i.options.getInteger('b')))}\``); break;
+            case 'affinedecode': e.setTitle('Affine Decode').setDescription(`\`${snip(affineDecode(i.options.getString('text'), i.options.getInteger('a'), i.options.getInteger('b')))}\``); break;
+            case 'railfence': { const r = i.options.getInteger('rails') ?? 3; e.setTitle(`Rail Fence (${r} rails)`).setDescription(`\`${snip(railFenceEncode(i.options.getString('text'), r))}\``); break; }
+            case 'railfencedecode': { const r = i.options.getInteger('rails') ?? 3; e.setTitle(`Rail Fence Decode`).setDescription(`\`${snip(railFenceDecode(i.options.getString('text'), r))}\``); break; }
+            case 'scytale': { const c = i.options.getInteger('cols') ?? 4; e.setTitle(`Scytale (${c} cols)`).setDescription(`\`${snip(scytaleEncode(i.options.getString('text'), c))}\``); break; }
+            case 'scytaledecode': { const c = i.options.getInteger('cols') ?? 4; e.setTitle(`Scytale Decode`).setDescription(`\`${snip(scytaleDecode(i.options.getString('text'), c))}\``); break; }
+            case 'columnar': e.setTitle('Columnar Encode').setDescription(`\`${snip(columnarEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+            case 'columnardecode': e.setTitle('Columnar Decode').setDescription(`\`${snip(columnarDecode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+            case 'polybius': e.setTitle('Polybius Encode').setDescription(`\`${snip(polybiusEncode(i.options.getString('text')))}\``); break;
+            case 'polybiusdecode': e.setTitle('Polybius Decode').setDescription(`\`${snip(polybiusDecode(i.options.getString('numbers')))}\``); break;
+            case 'baconian': e.setTitle('Baconian Encode').setDescription(`\`${snip(baconEncode(i.options.getString('text')))}\``); break;
+            case 'baconiandecode': e.setTitle('Baconian Decode').setDescription(`\`${snip(baconDecode(i.options.getString('bacon')))}\``); break;
+            case 'nato': e.setTitle('NATO').setDescription(`\`${snip(toNato(i.options.getString('text')))}\``); break;
+            case 'braille': e.setTitle('Braille').setDescription(`\`${snip(textToBraille(i.options.getString('text')))}\``); break;
+            case 't9': e.setTitle('T9').setDescription(`\`${snip(textToT9(i.options.getString('text')))}\``); break;
+            case 'phone': e.setTitle('Phone Digits').setDescription(`\`${snip(textToPhone(i.options.getString('text')))}\``); break;
+            case 'tapcode': e.setTitle('Tap Code Encode').setDescription(`\`${snip(tapCodeEncode(i.options.getString('text')))}\``); break;
+            case 'tapcodedecode': e.setTitle('Tap Code Decode').setDescription(`\`${snip(tapCodeDecode(i.options.getString('code')))}\``); break;
+            case 'urlencode': e.setTitle('URL Encode').setDescription(`\`${snip(urlEncode(i.options.getString('text')))}\``); break;
+            case 'urldecode': e.setTitle('URL Decode').setDescription(`\`${snip(urlDecode(i.options.getString('text')))}\``); break;
+            case 'htmlencode': e.setTitle('HTML Encode').setDescription(`\`${snip(htmlEncode(i.options.getString('text')))}\``); break;
+            case 'htmldecode': e.setTitle('HTML Decode').setDescription(`\`${snip(htmlDecode(i.options.getString('text')))}\``); break;
+            case 'xor': e.setTitle('XOR').setDescription(`\`${snip(xorCipher(i.options.getString('text'), i.options.getString('key')))}\``); break;
+            case 'gronsfeld': e.setTitle('Gronsfeld Encode').setDescription(`\`${snip(gronsfeldEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+            case 'gronsfelddecode': e.setTitle('Gronsfeld Decode').setDescription(`\`${snip(gronsfeldDecode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+            case 'autokey': e.setTitle('Autokey Encode').setDescription(`\`${snip(autokeyEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+
+            // ====================== BOTSTATS ======================
+            case 'botstats':
+                const up = Math.floor((Date.now() - startTime) / 1000);
+                const d = Math.floor(up / 86400), h = Math.floor((up % 86400) / 3600), m = Math.floor((up % 3600) / 60), s = up % 60;
+                e.setTitle('🤖 Bot Stats').addFields({ name:'Starts', value:`${botStats.startCount}`, inline:true }, { name:'Uptime', value:`${d}d ${h}h ${m}m ${s}s`, inline:true }, { name:'Commands', value:`${commands.length}`, inline:true }, { name:'Watched', value:`${loadWatched().length}`, inline:true }, { name:'Whitelisted', value:`${getAllowedGuilds().length} servers`, inline:true });
+                break;
+
+            // ====================== MENU ======================
+            case 'menu': {
+                const row = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('menu').setPlaceholder('Select cipher').addOptions([{ label:'ROT13', value:'rot13' }, { label:'Atbash', value:'atbash' }, { label:'Base64', value:'base64' }, { label:'Reverse', value:'reverse' }, { label:'Morse', value:'morse' }]));
+                await i.editReply({ embeds: [e.setTitle('🎛 Interactive Menu')], components: [row] });
+                const filter = m => m.user.id === i.user.id;
+                const collector = i.channel.createMessageComponentCollector({ filter, time: 60000, max: 1 });
+                collector.on('collect', async menu => {
+                    await menu.reply({ content: 'Type your message:', ephemeral: true });
+                    const msgCollector = i.channel.createMessageCollector({ filter, time: 30000, max: 1 });
+                    msgCollector.on('collect', async msg => {
+                        const fn = { rot13, atbash, base64: base64e, reverse, morse: textToMorse }[menu.values[0]];
+                        const res = fn ? fn(msg.content) : msg.content;
+                        await i.followUp({ embeds: [new EmbedBuilder().setColor(0x7c3aed).setTitle(menu.values[0].toUpperCase()).setDescription(`\`${snip(res)}\``)] });
+                    });
+                });
+                break;
+            }
         }
     } catch (err) {
         console.error(err);
