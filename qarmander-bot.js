@@ -20,8 +20,8 @@ const {
 } = require('discord.js');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
-const crypto = require('crypto');
-const fs = require('fs');
+// ❌ const crypto = require('crypto'); ← ELIMINADO (ya declarado arriba)
+// ❌ const fs = require('fs'); ← ELIMINADO (ya declarado arriba)
 const http = require('http');
 
 // ── Keep-alive ────────────────────────────────────────────────────────────────
