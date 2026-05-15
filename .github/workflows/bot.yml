@@ -3,12 +3,12 @@ name: Qarmander Bot 24/7
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"  # Cada 5 minutos
+    - cron: "*/5 * * * *"
 
 jobs:
   bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 355  # Casi 6 horas
+    timeout-minutes: 355
     
     steps:
       - uses: actions/checkout@v4
@@ -24,28 +24,35 @@ jobs:
         run: |
           echo "DISCORD_TOKEN=${{ secrets.DISCORD_TOKEN }}" > Sacred-Stuff.env
           echo "CLIENT_ID=${{ secrets.CLIENT_ID }}" >> Sacred-Stuff.env
+          echo "✅ Sacred-Stuff.env created"
       
-      - name: Run bot with keep-alive
+      - name: Run bot 24/7 with auto-restart
         run: |
-          # Keep-alive loop - mantiene el bot vivo
+          echo "🚀 Starting Qarmander Bot 24/7 mode"
+          echo "=================================="
+          
+          # Loop infinito para mantener el bot vivo
           while true; do
-            echo "🟢 Starting bot at $(date)"
-            node qarmander-bot.js &
-            BOT_PID=$!
+            echo ""
+            echo "🟢 Bot iniciando en: $(date)"
+            echo "──────────────────────────────────────────"
             
-            # Mantener vivo por 5 minutos
-            for i in {1..300}; do
-              if ! kill -0 $BOT_PID 2>/dev/null; then
-                echo "🔴 Bot died, restarting..."
-                break
-              fi
-              sleep 1
-            done
+            # Ejecutar el bot
+            node qarmander-bot.js
             
-            # Matar bot después de 5 minutos y reiniciar
-            kill $BOT_PID 2>/dev/null
-            wait $BOT_PID 2>/dev/null
+            # Capturar código de salida
+            EXIT_CODE=$?
             
-            echo "🔄 Restarting bot cycle..."
-            sleep 2
+            echo "──────────────────────────────────────────"
+            echo "🔴 Bot detenido con código: $EXIT_CODE en: $(date)"
+            
+            # Si el bot cerró normalmente (código 0), salir del loop
+            if [ $EXIT_CODE -eq 0 ]; then
+              echo "✅ Bot cerró normalmente. Finalizando."
+              break
+            fi
+            
+            # Esperar antes de reiniciar
+            echo "🔄 Reiniciando bot en 10 segundos..."
+            sleep 10
           done
