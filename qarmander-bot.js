@@ -1,5 +1,3 @@
-const fs = require("fs");
-
 if (fs.existsSync("./Sacred-Stuff.env")) {
     const envFile = fs.readFileSync("./Sacred-Stuff.env", "utf8");
 
