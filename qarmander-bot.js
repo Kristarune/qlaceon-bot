@@ -60,7 +60,7 @@ function getAllowedGuilds() {
     return [...new Set([...HARDCODED_GUILDS, ...dynamic])];
 }
 
-const BOT_ADMINS = ['1343208613430300744', '1268193957506744380']; // spanishrobey, gasheper
+const BOT_ADMINS = ['1343208613430300744', '871464358817959946']; // spanishrobey, gasheper
 
 // ── Game Watcher ──────────────────────────────────────────────────────────────
 const WATCHED_FILE   = './watched-games.json';
