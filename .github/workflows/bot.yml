@@ -1,58 +1,33 @@
-name: Qarmander Bot 24/7
+name: Diagnostic - Check Secrets
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "*/5 * * * *"
 
 jobs:
-  bot:
+  diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 355
     
     steps:
       - uses: actions/checkout@v4
       
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      
-      - name: Install dependencies
-        run: npm install discord.js
-      
-      - name: Create env file
+      - name: Check if secrets are available
         run: |
-          echo "DISCORD_TOKEN=${{ secrets.DISCORD_TOKEN }}" > Sacred-Stuff.env
-          echo "CLIENT_ID=${{ secrets.CLIENT_ID }}" >> Sacred-Stuff.env
-          echo "✅ Sacred-Stuff.env created"
-      
-      - name: Run bot 24/7 with auto-restart
-        run: |
-          echo "🚀 Starting Qarmander Bot 24/7 mode"
-          echo "=================================="
+          echo "=== SECRETS DIAGNOSTIC ==="
+          echo ""
+          echo "DISCORD_TOKEN exists: ${{ secrets.DISCORD_TOKEN != '' }}"
+          echo "CLIENT_ID exists: ${{ secrets.CLIENT_ID != '' }}"
+          echo ""
           
-          # Loop infinito para mantener el bot vivo
-          while true; do
-            echo ""
-            echo "🟢 Bot iniciando en: $(date)"
-            echo "──────────────────────────────────────────"
-            
-            # Ejecutar el bot
-            node qarmander-bot.js
-            
-            # Capturar código de salida
-            EXIT_CODE=$?
-            
-            echo "──────────────────────────────────────────"
-            echo "🔴 Bot detenido con código: $EXIT_CODE en: $(date)"
-            
-            # Si el bot cerró normalmente (código 0), salir del loop
-            if [ $EXIT_CODE -eq 0 ]; then
-              echo "✅ Bot cerró normalmente. Finalizando."
-              break
-            fi
-            
-            # Esperar antes de reiniciar
-            echo "🔄 Reiniciando bot en 10 segundos..."
-            sleep 10
-          done
+          if [ "${{ secrets.DISCORD_TOKEN }}" != "" ]; then
+            TOKEN_LEN=$(echo -n "${{ secrets.DISCORD_TOKEN }}" | wc -c)
+            echo "DISCORD_TOKEN length: $TOKEN_LEN"
+            echo "DISCORD_TOKEN starts with: $(echo "${{ secrets.DISCORD_TOKEN }}" | cut -c1-15)..."
+          else
+            echo "❌ DISCORD_TOKEN is EMPTY or NOT SET!"
+          fi
+          
+          if [ "${{ secrets.CLIENT_ID }}" != "" ]; then
+            echo "CLIENT_ID: ${{ secrets.CLIENT_ID }}"
+          else
+            echo "❌ CLIENT_ID is EMPTY or NOT SET!"
+          fi
