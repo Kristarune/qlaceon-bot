@@ -1,6 +1,16 @@
-require("dotenv").config({
-    path: "./Sacred-Stuff.env"
-});
+const fs = require("fs");
+
+if (fs.existsSync("./Sacred-Stuff.env")) {
+    const envFile = fs.readFileSync("./Sacred-Stuff.env", "utf8");
+
+    envFile.split("\n").forEach(line => {
+        const [key, ...value] = line.split("=");
+
+        if (key && value.length) {
+            process.env[key.trim()] = value.join("=").trim();
+        }
+    });
+}
 
 
 const {
