@@ -1,3 +1,6 @@
+const fs = require('fs');
+const crypto = require('crypto');
+
 if (fs.existsSync("./Sacred-Stuff.env")) {
     const envFile = fs.readFileSync("./Sacred-Stuff.env", "utf8");
 
