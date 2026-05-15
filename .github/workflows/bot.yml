@@ -1,33 +1,63 @@
-name: Diagnostic - Check Secrets
+name: Qarmander Bot 24/7
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
 
 jobs:
-  diagnose:
+  bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 355
     
     steps:
       - uses: actions/checkout@v4
       
-      - name: Check if secrets are available
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install dependencies
+        run: npm install discord.js
+      
+      - name: Create env file
         run: |
-          echo "=== SECRETS DIAGNOSTIC ==="
-          echo ""
-          echo "DISCORD_TOKEN exists: ${{ secrets.DISCORD_TOKEN != '' }}"
-          echo "CLIENT_ID exists: ${{ secrets.CLIENT_ID != '' }}"
-          echo ""
+          echo "DISCORD_TOKEN=${{ secrets.DISCORD_TOKEN }}" > Sacred-Stuff.env
+          echo "CLIENT_ID=${{ secrets.CLIENT_ID }}" >> Sacred-Stuff.env
+          echo "✅ Sacred-Stuff.env created"
+      
+      - name: Run bot 24/7 with auto-restart
+        run: |
+          echo "╔════════════════════════════════════════════════════╗"
+          echo "║     🚀 QARMANDER BOT - 24/7 MODE ACTIVATED        ║"
+          echo "║     Iniciado en: $(date)                           ║"
+          echo "╚════════════════════════════════════════════════════╝"
           
-          if [ "${{ secrets.DISCORD_TOKEN }}" != "" ]; then
-            TOKEN_LEN=$(echo -n "${{ secrets.DISCORD_TOKEN }}" | wc -c)
-            echo "DISCORD_TOKEN length: $TOKEN_LEN"
-            echo "DISCORD_TOKEN starts with: $(echo "${{ secrets.DISCORD_TOKEN }}" | cut -c1-15)..."
-          else
-            echo "❌ DISCORD_TOKEN is EMPTY or NOT SET!"
-          fi
+          CONTADOR=0
           
-          if [ "${{ secrets.CLIENT_ID }}" != "" ]; then
-            echo "CLIENT_ID: ${{ secrets.CLIENT_ID }}"
-          else
-            echo "❌ CLIENT_ID is EMPTY or NOT SET!"
-          fi
+          while true; do
+            CONTADOR=$((CONTADOR + 1))
+            echo ""
+            echo "════════════════════════════════════════════════════"
+            echo "🔄 CICLO #$CONTADOR - $(date)"
+            echo "════════════════════════════════════════════════════"
+            
+            # Ejecutar el bot
+            node qarmander-bot.js
+            
+            EXIT_CODE=$?
+            
+            echo ""
+            echo "────────────────────────────────────────────────────"
+            echo "⚠️ Bot terminó con código: $EXIT_CODE - $(date)"
+            echo "────────────────────────────────────────────────────"
+            
+            # Si el bot cerró normalmente (código 0)
+            if [ $EXIT_CODE -eq 0 ]; then
+              echo "✅ Bot cerró correctamente. Continuando..."
+            fi
+            
+            # Esperar antes de reiniciar
+            echo "🔄 Reiniciando en 5 segundos..."
+            sleep 5
+          done
