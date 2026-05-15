@@ -1,3 +1,8 @@
+require("dotenv").config({
+    path: "./Sacred-Stuff.env"
+});
+
+
 const {
     Client, GatewayIntentBits, EmbedBuilder, REST, Routes,
     SlashCommandBuilder, ActionRowBuilder, StringSelectMenuBuilder, PermissionFlagsBits
