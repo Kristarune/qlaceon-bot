@@ -1,39 +1,51 @@
-
-name: Discord Bot 24/7
+name: Qarmander Bot 24/7
 
 on:
   workflow_dispatch:
-
   schedule:
-    - cron: "0 */5 * * *"
+    - cron: "*/5 * * * *"  # Cada 5 minutos
 
 jobs:
-  run-bot:
+  bot:
     runs-on: ubuntu-latest
-
-    timeout-minutes: 355
-
+    timeout-minutes: 355  # Casi 6 horas
+    
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-node@v4
         with:
-          node-version: 20
-
+          node-version: '20'
+      
       - name: Install dependencies
-        run: npm install
-
+        run: npm install discord.js
+      
       - name: Create env file
         run: |
-          echo "${{ secrets.Sacred-Stuff }}" > Sacred-Stuff.env
-
-      - name: Start bot
+          echo "DISCORD_TOKEN=${{ secrets.DISCORD_TOKEN }}" > Sacred-Stuff.env
+          echo "CLIENT_ID=${{ secrets.CLIENT_ID }}" >> Sacred-Stuff.env
+      
+      - name: Run bot with keep-alive
         run: |
-          while true
-          do
-            node qarmander-bot.js
-            echo "Bot crashed. Restarting in 5 seconds..."
-            sleep 5
+          # Keep-alive loop - mantiene el bot vivo
+          while true; do
+            echo "🟢 Starting bot at $(date)"
+            node qarmander-bot.js &
+            BOT_PID=$!
+            
+            # Mantener vivo por 5 minutos
+            for i in {1..300}; do
+              if ! kill -0 $BOT_PID 2>/dev/null; then
+                echo "🔴 Bot died, restarting..."
+                break
+              fi
+              sleep 1
+            done
+            
+            # Matar bot después de 5 minutos y reiniciar
+            kill $BOT_PID 2>/dev/null
+            wait $BOT_PID 2>/dev/null
+            
+            echo "🔄 Restarting bot cycle..."
+            sleep 2
           done
