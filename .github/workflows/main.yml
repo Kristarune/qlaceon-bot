@@ -1,0 +1,33 @@
+name: Qarmander Bot 24/7
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
+
+jobs:
+  bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - run: npm install discord.js
+      
+      - name: Create .env
+        run: |
+          echo "DISCORD_TOKEN=${{ secrets.DISCORD_TOKEN }}" > Sacred-Stuff.env
+          echo "CLIENT_ID=${{ secrets.CLIENT_ID }}" >> Sacred-Stuff.env
+      
+      - name: Run bot 24/7
+        run: |
+          while true; do
+            echo "🟢 Bot online - $(date)"
+            node index.js
+            echo "🔴 Bot stopped, restarting in 5 seconds..."
+            sleep 5
+          done
