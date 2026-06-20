@@ -32,7 +32,7 @@ const {
     SlashCommandBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle
 } = require('discord.js');
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMessages] });
 const http = require('http');
 
 // ── Keep-alive server (for Replit / UptimeRobot) ─────────────────────────────
@@ -96,7 +96,7 @@ async function getUniverseFromPlace(placeId) {
     return null;
 }
 
-// ========== ALL CIPHER FUNCTIONS (unchanged) ==========
+// ========== ALL CIPHER FUNCTIONS ==========
 function rot13(t) { return t.replace(/[A-Za-z]/g, c => String.fromCharCode((c.charCodeAt(0) - (c < 'a' ? 65 : 97) + 13) % 26 + (c < 'a' ? 65 : 97))); }
 function rot47(t) { return t.replace(/[\x21-\x7E]/g, c => String.fromCharCode(((c.charCodeAt(0) - 33 + 47) % 94) + 33)); }
 function atbash(t) { return t.replace(/[A-Za-z]/g, c => String.fromCharCode((c < 'a' ? 90 : 122) - (c.charCodeAt(0) - (c < 'a' ? 65 : 97)))); }
@@ -321,10 +321,23 @@ async function checkWatchedGames() {
     saveWatched(watched);
 }
 
-// ========== SLASH COMMANDS (full list) ==========
+// ========== SLASH COMMANDS ==========
 const commands = [
-    new SlashCommandBuilder().setName('help').setDescription('Show all Qarmander commands'),
+    // ── Track Command ──────────────────────────────────────────────────────
+    new SlashCommandBuilder()
+        .setName('track')
+        .setDescription('Request to track a Roblox game (sends request to owners)')
+        .addStringOption(o => 
+            o.setName('universe_id')
+                .setDescription('Roblox Universe ID')
+                .setRequired(false))
+        .addStringOption(o => 
+            o.setName('place_id')
+                .setDescription('Roblox Place ID (will resolve to universe)')
+                .setRequired(false)),
+    
     // ── Request System ──────────────────────────────────────────────────────
+    new SlashCommandBuilder().setName('help').setDescription('Show all Qarmander commands'),
     new SlashCommandBuilder().setName('request_game')
         .setDescription('Suggest a Roblox game to be monitored (for owners to review)')
         .addStringOption(o => o.setName('universe_id').setDescription('Roblox Universe ID').setRequired(false))
@@ -339,7 +352,6 @@ const commands = [
                 { name: 'browse', value: 'browse' }
             ))
         .addStringOption(o => o.setName('request_id').setDescription('Request ID (for approve/reject)').setRequired(false)),
-    // ── Existing commands ───────────────────────────────────────────────────
     new SlashCommandBuilder().setName('whitelist_server').setDescription('Add/remove server from whitelist (bot admins only)')
         .addStringOption(o => o.setName('action').setDescription('add or remove').setRequired(true).addChoices({ name:'add', value:'add' }, { name:'remove', value:'remove' }))
         .addStringOption(o => o.setName('guild_id').setDescription('Discord Guild ID').setRequired(true)),
@@ -459,7 +471,179 @@ client.once('ready', async () => {
     setInterval(updateUptimeStatus, 60000);
 });
 
-// ── Interaction Handler with safe deferReply and request handlers ────────────
+// ── MESSAGE COMMANDS (!track, !help, etc.) ────────────────────────────────────
+client.on('messageCreate', async (message) => {
+    // Ignore bots and non-command messages
+    if (message.author.bot) return;
+    if (!message.content.startsWith('!')) return;
+
+    // Check if server is whitelisted
+    if (!getAllowedGuilds().includes(message.guildId)) {
+        return message.reply('❌ This server is not whitelisted.');
+    }
+
+    const args = message.content.slice(1).trim().split(/ +/);
+    const command = args.shift().toLowerCase();
+
+    // ── !track command ──────────────────────────────────────────────────
+    if (command === 'track') {
+        const firstArg = args[0] || '';
+        let targetUniverseId = null;
+        let originalPlaceId = null;
+
+        // Try to detect if it's a place ID or universe ID
+        if (firstArg.match(/^\d+$/)) {
+            if (firstArg.length > 10) {
+                originalPlaceId = firstArg;
+                const embed = new EmbedBuilder()
+                    .setColor(0xf59e0b)
+                    .setTitle('⏳ Resolving Place ID...')
+                    .setDescription(`Resolving place ID \`${firstArg}\` to universe...`);
+                await message.reply({ embeds: [embed] });
+
+                targetUniverseId = await getUniverseFromPlace(firstArg);
+                if (!targetUniverseId) {
+                    return message.reply(`❌ Could not find a universe for place ID \`${firstArg}\`.`);
+                }
+            } else {
+                targetUniverseId = firstArg;
+            }
+        } else {
+            return message.reply('❌ Please provide a valid Universe ID or Place ID.\nExample: `!track 6215464786` or `!track 78039890222332`');
+        }
+
+        // Check if already watched
+        const watched = loadWatched();
+        if (watched.some(w => w.universeId === targetUniverseId)) {
+            return message.reply(`ℹ️ Universe \`${targetUniverseId}\` is already being monitored.`);
+        }
+
+        // Fetch game info
+        const gameInfo = await getGameInfo(targetUniverseId);
+        if (!gameInfo) {
+            return message.reply(`❌ Universe ID \`${targetUniverseId}\` does not exist.`);
+        }
+
+        // Check for existing pending request
+        const requests = loadRequests();
+        const existingRequest = requests.find(r => r.universeId === targetUniverseId && r.status === 'pending');
+        if (existingRequest) {
+            return message.reply(`⚠️ A request for **${gameInfo.name}** is already pending.`);
+        }
+
+        // Create request
+        const newRequest = {
+            id: Date.now().toString(),
+            universeId: targetUniverseId,
+            placeId: originalPlaceId,
+            name: gameInfo.name,
+            requestedBy: message.author.id,
+            requestedAt: new Date().toISOString(),
+            status: 'pending'
+        };
+        requests.push(newRequest);
+        saveRequests(requests);
+
+        const embed = new EmbedBuilder()
+            .setTitle('📨 Game Request Submitted')
+            .setDescription(`**${gameInfo.name}** has been submitted for review.`)
+            .setColor(0x06b6d4)
+            .addFields(
+                { name: 'Universe ID', value: `\`${targetUniverseId}\``, inline: true },
+                { name: 'Request ID', value: `\`${newRequest.id}\``, inline: true },
+                { name: 'Requested by', value: `<@${message.author.id}>`, inline: true }
+            );
+        if (originalPlaceId) embed.addFields({ name: 'Original Place ID', value: `\`${originalPlaceId}\``, inline: true });
+        
+        await message.reply({ embeds: [embed] });
+
+        // Notify owners
+        for (const ownerId of BOT_ADMINS) {
+            const owner = await client.users.fetch(ownerId).catch(() => null);
+            if (owner) {
+                owner.send({ 
+                    embeds: [new EmbedBuilder()
+                        .setColor(0xf59e0b)
+                        .setTitle('📨 New Game Request (!track)')
+                        .setDescription(`**${gameInfo.name}**\nUniverse: \`${targetUniverseId}\`\nRequested by: <@${message.author.id}>\nUse \`/manage_requests browse\` to review.`)
+                    ] 
+                }).catch(() => {});
+            }
+        }
+        return;
+    }
+
+    // ── !help command ─────────────────────────────────────────────────────
+    if (command === 'help') {
+        const embed = new EmbedBuilder()
+            .setTitle('🔐 Qarmander Commands')
+            .setDescription(
+                `**🎮 Roblox:** /robloxgame, /robloxuser, /subplaces, /brute_link\n` +
+                `**📨 Track:** !track <universe_id> or !track <place_id>\n` +
+                `**📺 Admin:** /whitelist_game, /manage_requests\n` +
+                `**🔄 Basic:** /rot13, /rot47, /atbash, /reverse, /xor\n` +
+                `**💻 Encoding:** /base64, /bin, /hex, /octal, /ascii\n` +
+                `**🔒 Hashing:** /md5, /sha1, /sha256, /sha512\n` +
+                `**🔑 Ciphers:** /caesar, /vigenere, /beaufort, /affine\n` +
+                `**🚂 Transposition:** /railfence, /scytale, /columnar\n` +
+                `**📡 Classic:** /morse, /polybius, /baconian, /nato, /braille\n` +
+                `**🌐 Web:** /urlencode, /urldecode, /htmlencode, /htmldecode\n` +
+                `**🎛️ Other:** /menu, /botstats`
+            )
+            .setColor(0x7c3aed);
+        return message.reply({ embeds: [embed] });
+    }
+
+    // ── !listgames command ────────────────────────────────────────────────
+    if (command === 'listgames' || command === 'list') {
+        const watched = loadWatched();
+        if (!watched.length) {
+            return message.reply('📭 No games are currently being tracked.');
+        }
+        const embed = new EmbedBuilder()
+            .setTitle(`📺 Watched Games (${watched.length})`)
+            .setDescription(watched.map((w, i) => 
+                `**${i+1}.** ${w.name || w.universeId}\n` +
+                `Universe: \`${w.universeId}\`\n` +
+                `Subplaces: ${w.subplaces?.length || 0}`
+            ).join('\n\n').slice(0, 4000))
+            .setColor(0x06b6d4);
+        return message.reply({ embeds: [embed] });
+    }
+
+    // ── !status command ───────────────────────────────────────────────────
+    if (command === 'status') {
+        const uptimeSeconds = Math.floor(process.uptime());
+        const days = Math.floor(uptimeSeconds / 86400);
+        const hours = Math.floor((uptimeSeconds % 86400) / 3600);
+        const minutes = Math.floor((uptimeSeconds % 3600) / 60);
+        const seconds = uptimeSeconds % 60;
+        let uptimeStr = '';
+        if (days > 0) uptimeStr += `${days}d `;
+        if (hours > 0 || days > 0) uptimeStr += `${hours}h `;
+        if (minutes > 0 || hours > 0 || days > 0) uptimeStr += `${minutes}m `;
+        uptimeStr += `${seconds}s`;
+
+        const watched = loadWatched();
+        const requests = loadRequests();
+        const pending = requests.filter(r => r.status === 'pending');
+
+        const embed = new EmbedBuilder()
+            .setTitle('🤖 Qarmander Status')
+            .addFields(
+                { name: 'Uptime', value: uptimeStr, inline: true },
+                { name: 'Watched Games', value: `${watched.length}`, inline: true },
+                { name: 'Pending Requests', value: `${pending.length}`, inline: true },
+                { name: 'Whitelisted Servers', value: `${getAllowedGuilds().length}`, inline: true },
+                { name: 'Total Starts', value: `${botStats.startCount}`, inline: true }
+            )
+            .setColor(0x7c3aed)
+            .setFooter({ text: `Bot started ${new Date(startTime).toLocaleString()}` });
+        return message.reply({ embeds: [embed] });
+    }
+});
+
+// ── Interaction Handler ──────────────────────────────────────────────────────
 client.on('interactionCreate', async i => {
     if (!i.isCommand()) return;
     if (!getAllowedGuilds().includes(i.guildId)) {
@@ -480,6 +664,107 @@ client.on('interactionCreate', async i => {
 
     try {
         switch (i.commandName) {
+            // ====================== TRACK ======================
+            case 'track': {
+                const universeIdInput = i.options.getString('universe_id');
+                const placeIdInput = i.options.getString('place_id');
+
+                if (!universeIdInput && !placeIdInput) {
+                    await i.editReply({ 
+                        embeds: [e.setTitle('❌ Missing ID')
+                            .setDescription('You must provide either a `universe_id` or a `place_id`.')] 
+                    });
+                    break;
+                }
+
+                let targetUniverseId = universeIdInput;
+                let originalPlaceId = null;
+
+                if (placeIdInput) {
+                    originalPlaceId = placeIdInput;
+                    e.setDescription(`Resolving place ID ${placeIdInput} to universe...`);
+                    await i.editReply({ embeds: [e] });
+                    targetUniverseId = await getUniverseFromPlace(placeIdInput);
+                    if (!targetUniverseId) {
+                        await i.editReply({ 
+                            embeds: [e.setTitle('❌ Invalid Place')
+                                .setDescription(`Could not find a universe for place ID \`${placeIdInput}\`.`)] 
+                        });
+                        break;
+                    }
+                }
+
+                // Check if already watched
+                const watched = loadWatched();
+                if (watched.some(w => w.universeId === targetUniverseId)) {
+                    await i.editReply({ 
+                        embeds: [e.setTitle('ℹ️ Already Watched')
+                            .setDescription(`Universe \`${targetUniverseId}\` is already being monitored.`)] 
+                    });
+                    break;
+                }
+
+                // Fetch game info
+                const gameInfo = await getGameInfo(targetUniverseId);
+                if (!gameInfo) {
+                    await i.editReply({ 
+                        embeds: [e.setTitle('❌ Game Not Found')
+                            .setDescription(`Universe ID \`${targetUniverseId}\` does not exist.`)] 
+                    });
+                    break;
+                }
+
+                // Check for existing pending request
+                const requests = loadRequests();
+                const existingRequest = requests.find(r => r.universeId === targetUniverseId && r.status === 'pending');
+                if (existingRequest) {
+                    await i.editReply({ 
+                        embeds: [e.setTitle('⚠️ Already Requested')
+                            .setDescription(`A request for **${gameInfo.name}** is already pending.`)] 
+                    });
+                    break;
+                }
+
+                // Create request
+                const newRequest = {
+                    id: Date.now().toString(),
+                    universeId: targetUniverseId,
+                    placeId: originalPlaceId,
+                    name: gameInfo.name,
+                    requestedBy: i.user.id,
+                    requestedAt: new Date().toISOString(),
+                    status: 'pending'
+                };
+                requests.push(newRequest);
+                saveRequests(requests);
+
+                e.setTitle('📨 Game Request Submitted')
+                    .setDescription(`**${gameInfo.name}** has been submitted for review.`)
+                    .setColor(0x06b6d4)
+                    .addFields(
+                        { name: 'Universe ID', value: `\`${targetUniverseId}\``, inline: true },
+                        { name: 'Request ID', value: `\`${newRequest.id}\``, inline: true },
+                        { name: 'Requested by', value: `<@${i.user.id}>`, inline: true }
+                    );
+                if (originalPlaceId) e.addFields({ name: 'Original Place ID', value: `\`${originalPlaceId}\``, inline: true });
+                await i.editReply({ embeds: [e] });
+
+                // Notify owners
+                for (const ownerId of BOT_ADMINS) {
+                    const owner = await client.users.fetch(ownerId).catch(() => null);
+                    if (owner) {
+                        owner.send({ 
+                            embeds: [new EmbedBuilder()
+                                .setColor(0xf59e0b)
+                                .setTitle('📨 New Game Request (/track)')
+                                .setDescription(`**${gameInfo.name}**\nUniverse: \`${targetUniverseId}\`\nRequested by: <@${i.user.id}>\nUse \`/manage_requests browse\` to review.`)
+                            ] 
+                        }).catch(() => {});
+                    }
+                }
+                break;
+            }
+
             // ====================== REQUEST_GAME ======================
             case 'request_game': {
                 const universeIdInput = i.options.getString('universe_id');
