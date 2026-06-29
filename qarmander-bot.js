@@ -38,7 +38,7 @@ console.log('GEMINI_API_KEY:', process.env.GEMINI_API_KEY ? '✅ Present' : '❌
 console.log('================================');
 
 // ============================================
-// GEMINI AI SETUP (for /ask command)
+// GEMINI AI SETUP
 // ============================================
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 let genAI = null;
@@ -327,14 +327,14 @@ const commands = [
     new SlashCommandBuilder().setName('botstats').setDescription('Show bot statistics'),
     new SlashCommandBuilder().setName('menu').setDescription('Open interactive menu'),
 
-    // Roblox search commands (using fetch, no noblox)
+    // Roblox search commands
     new SlashCommandBuilder().setName('gamesearch').setDescription('Search for a Roblox game by name').addStringOption(o => o.setName('query').setDescription('Game name').setRequired(true)),
     new SlashCommandBuilder().setName('robloxuserinfo').setDescription('Get info about a Roblox user by username').addStringOption(o => o.setName('username').setDescription('Roblox username').setRequired(true)),
     new SlashCommandBuilder().setName('robloxuserid').setDescription('Get info about a Roblox user by ID').addStringOption(o => o.setName('userid').setDescription('Roblox user ID').setRequired(true)),
     new SlashCommandBuilder().setName('groupinfo').setDescription('Get info about a Roblox group').addStringOption(o => o.setName('groupid').setDescription('Roblox group ID').setRequired(true)),
     new SlashCommandBuilder().setName('assetinfo').setDescription('Get info about a Roblox asset').addStringOption(o => o.setName('assetid').setDescription('Asset ID').setRequired(true)),
 
-    // Soggy image command
+    // Soggy command
     new SlashCommandBuilder()
         .setName('sogme')
         .setDescription('Get a random soggy image')
@@ -354,7 +354,7 @@ const commands = [
     new SlashCommandBuilder().setName('robloxgame').setDescription('Look up a Roblox game by Universe ID').addStringOption(o => o.setName('id').setDescription('Universe ID').setRequired(true)),
     new SlashCommandBuilder().setName('robloxuser').setDescription('Look up a Roblox user by username').addStringOption(o => o.setName('username').setDescription('Roblox username').setRequired(true)),
 
-    // Cipher commands
+    // Cipher commands (all)
     new SlashCommandBuilder().setName('rot13').setDescription('ROT13 encode/decode').addStringOption(o => o.setName('text').setDescription('Text').setRequired(true)),
     new SlashCommandBuilder().setName('rot47').setDescription('ROT47 cipher').addStringOption(o => o.setName('text').setDescription('Text').setRequired(true)),
     new SlashCommandBuilder().setName('atbash').setDescription('Atbash cipher').addStringOption(o => o.setName('text').setDescription('Text').setRequired(true)),
@@ -474,7 +474,7 @@ client.on('interactionCreate', async i => {
             e.setTitle('🏓 Pong!').setDescription(`Latency: ${Date.now() - i.createdTimestamp}ms`);
             break;
 
-        // ----- /gamesearch (fixed) -----
+        // ----- /gamesearch -----
         case 'gamesearch': {
             const query = i.options.getString('query');
             await i.editReply(`🔍 Searching Roblox for "${query}"...`);
@@ -504,7 +504,7 @@ client.on('interactionCreate', async i => {
             break;
         }
 
-        // ----- /robloxuserinfo (fixed) -----
+        // ----- /robloxuserinfo -----
         case 'robloxuserinfo': {
             const username = i.options.getString('username');
             await i.editReply(`🔍 Looking up ${username}...`);
@@ -540,7 +540,7 @@ client.on('interactionCreate', async i => {
             break;
         }
 
-        // ----- /robloxuserid (fixed) -----
+        // ----- /robloxuserid -----
         case 'robloxuserid': {
             const userId = i.options.getString('userid');
             await i.editReply(`🔍 Looking up user ID ${userId}...`);
@@ -565,7 +565,7 @@ client.on('interactionCreate', async i => {
             break;
         }
 
-        // ----- /groupinfo (fixed) -----
+        // ----- /groupinfo -----
         case 'groupinfo': {
             const groupId = i.options.getString('groupid');
             await i.editReply(`🔍 Looking up group ${groupId}...`);
@@ -591,7 +591,7 @@ client.on('interactionCreate', async i => {
             break;
         }
 
-        // ----- /assetinfo (fixed) -----
+        // ----- /assetinfo -----
         case 'assetinfo': {
             const assetId = i.options.getString('assetid');
             await i.editReply(`🔍 Looking up asset ${assetId}...`);
@@ -653,7 +653,7 @@ client.on('interactionCreate', async i => {
             break;
         }
 
-        // ----- /ask (AI) -----
+        // ----- /ask -----
         case 'ask': {
             const question = i.options.getString('question');
             if (!aiModel) {
@@ -676,7 +676,7 @@ client.on('interactionCreate', async i => {
             break;
         }
 
-        // ----- Original Roblox commands (simplified) -----
+        // ----- /robloxgame -----
         case 'robloxgame': {
             const id = i.options.getString('id');
             const game = await getGameInfo(id);
@@ -693,6 +693,8 @@ client.on('interactionCreate', async i => {
             }
             break;
         }
+
+        // ----- /robloxuser (original) -----
         case 'robloxuser': {
             const username = i.options.getString('username');
             const user = await getRobloxUser(username);
@@ -700,84 +702,50 @@ client.on('interactionCreate', async i => {
                 e.setTitle(`👤 ${user.name}`).setDescription(`ID: ${user.id}\nDisplay: ${user.displayName}`);
             } else {
                 e.setTitle('❌ User not found');
-            } else {
-                e.setTitle('❌ User not found');
             }
             break;
         }
- }
-            break;
-        }
+
+        // ----- /subplaces -----
         case 'subplaces': {
             const uid = i.options.getString('universe_id');
             const subs = await getSubplaces(uid);
-                   case 'subplaces': {
-            const uid = i.options.getString('universe_id');
-            const subs = await getSubplaces(uid);
-            e.setTitle(`Subplaces for ${uid}`).setDescription(subs.length ? subs.map(p => `• ${p.name} e.setTitle(`Subplaces for ${uid}`).setDescription(subs.length ? subs.map(p => `• ${p.name} (${p.id})`).join('\n').slice(0, 4000) : 'None found');
+            e.setTitle(`Subplaces for ${uid}`).setDescription(subs.length ? subs.map(p => `• ${p.name} (${p.id})`).join('\n').slice(0, 4000) : 'None found');
             break;
         }
-        case 'brute_link': {
-            const id (${p.id})`).join('\n').slice(0, 4000) : 'None found');
-            break;
-        }
+
+        // ----- /brute_link -----
         case 'brute_link': {
             const id = i.options.getString('id');
             const results = await bruteForceRoblox(id);
-            e.setTitle(` = i.options.getString('id');
-            const results = await bruteForceRoblox(id);
-            e.setTitle(`🔍 Bruteforce for ${id}`).setDescription(Object.entries(results🔍 Bruteforce for ${id}`).setDescription(Object.entries(results).map(([k,v]) => `${k).map(([k,v]) => `${k}: ${v.success ? '✅' : '❌'}`).join('\n'));
+            e.setTitle(`🔍 Bruteforce for ${id}`).setDescription(Object.entries(results).map(([k,v]) => `${k}: ${v.success ? '✅' : '❌'}`).join('\n'));
             break;
         }
-       }: ${v.success ? '✅' : '❌'}`).join('\n'));
-            break;
-        }
+
+        // ----- /botstats -----
         case 'botstats': {
             const up = Math.floor((Date.now() - startTime) / 1000);
-            const d = Math.floor(up case 'botstats': {
-            const up = Math.floor((Date.now() - startTime) / 1000);
-            const d = Math.floor(up / / 86400), h = Math.floor((up % 86400) / 3600 86400), h = Math.floor((up % 86400) / 3600), m = Math.floor((up % 3600) / 60);
-            e.setTitle('🤖 Bot Stats').addFields(
-                { name: 'Starts', value:), m = Math.floor((up % 3600) / 60);
+            const d = Math.floor(up / 86400), h = Math.floor((up % 86400) / 3600), m = Math.floor((up % 3600) / 60);
             e.setTitle('🤖 Bot Stats').addFields(
                 { name: 'Starts', value: `${botStats.startCount}`, inline: true },
-                `${botStats.startCount}`, inline: true },
                 { name: 'Uptime', value: `${d}d ${h}h ${m}m`, inline: true },
-                { name: { name: 'Uptime', value: `${d}d ${h}h ${m}m`, inline: true },
-                { name 'Commands', value: `${commands.length}`, inline: true },
-                { name: 'AI', value: aiModel ? '✅: 'Commands', value: `${commands.length}`, inline: true },
+                { name: 'Commands', value: `${commands.length}`, inline: true },
                 { name: 'AI', value: aiModel ? '✅' : '❌', inline: true }
             );
             break;
         }
 
-        // ----- Cipher handlers (' : '❌', inline: true }
-            );
-            break;
-        }
-
-        // ----- Cipher handlers (quick) -----
-        case 'rot13': e.setTitle('ROT13').setquick) -----
-        case 'rot13': e.setTitle('ROT13').setDescription(`\`${snip(rot13(i.options.getString('text')))}\``); breakDescription(`\`${snip(rot13(i.options.getString('text')))}\``); break;
-        case 'rot47': e.setTitle('ROT47').setDescription(`\`;
-        case 'rot47': e.setTitle('ROT47').setDescription${snip(rot47(i.options.getString('text')))}\``); break;
-        case 'atbash': e(`\`${snip(rot47(i.options.getString('text')))}\``); break;
-        case 'atbash': e.setTitle('Atbash').setDescription(`\`${snip(atbash(i.setTitle('Atbash').setDescription(`\`${snip(atbash(i.options.getString('.options.getString('text')))}\``); break;
-        case 'base64': e.setTitle('Base64').setDescription(`\`${snip(base64etext')))}\``); break;
-        case 'base64': e.setTitle('Base64').setDescription(`\`${snip(base64e(i.options.getString(i.options.getString('text')))}\``); break;
-        case 'base64d': e.setTitle('Base64 Decode').setDescription(`\`${snip('text')))}\``); break;
-        case 'base64d': e.setTitle('Base64 Decode').setDescription(`\(base64d(i.options.getString('text')))`${snip(base64d(i.options.getString('text')))}\``); break;
-        case 'reverse': e.setTitle('Reverse').}\``); break;
-        case 'reverse': e.setTitle('setDescription(`\`${snip(reverse(i.options.getString('text')))}\``); breakReverse').setDescription(`\`${snip(reverse(i.options.getString('text')))}\``); break;
-        case 'bin;
-        case 'bin': e.setTitle('Binary').setDescription(`\`${sn': e.setTitle('Binary').setDescription(`\`${snip(textToBin(i.options.getString('ip(textToBin(i.options.getString('text')))}\text')))}\``); break;
-        case 'bindecode': e``); break;
-        case 'bindecode': e.setTitle('Binary Decode').setDescription(`\`${snip(binToText(i.options.getString('binary.setTitle('Binary Decode').setDescription(`\`${snip(binToText(i.options.getString('binary')))}\')))}\``); break;
-        case 'hex': e.setTitle('Hex').setDescription(`\`${snip(textToHex(i.options.getString('text')))}\``); break;
-        case 'hexdecode': e.setTitle('Hex``); break;
+        // ----- Cipher commands (all) -----
+        case 'rot13': e.setTitle('ROT13').setDescription(`\`${snip(rot13(i.options.getString('text')))}\``); break;
+        case 'rot47': e.setTitle('ROT47').setDescription(`\`${snip(rot47(i.options.getString('text')))}\``); break;
+        case 'atbash': e.setTitle('Atbash').setDescription(`\`${snip(atbash(i.options.getString('text')))}\``); break;
+        case 'base64': e.setTitle('Base64').setDescription(`\`${snip(base64e(i.options.getString('text')))}\``); break;
+        case 'base64d': e.setTitle('Base64 Decode').setDescription(`\`${snip(base64d(i.options.getString('text')))}\``); break;
+        case 'reverse': e.setTitle('Reverse').setDescription(`\`${snip(reverse(i.options.getString('text')))}\``); break;
+        case 'bin': e.setTitle('Binary').setDescription(`\`${snip(textToBin(i.options.getString('text')))}\``); break;
+        case 'bindecode': e.setTitle('Binary Decode').setDescription(`\`${snip(binToText(i.options.getString('binary')))}\``); break;
         case 'hex': e.setTitle('Hex').setDescription(`\`${snip(textToHex(i.options.getString('text')))}\``); break;
         case 'hexdecode': e.setTitle('Hex Decode').setDescription(`\`${snip(hexToText(i.options.getString('hex')))}\``); break;
-        Decode').setDescription(`\`${snip(hexToText(i.options.getString('hex')))}\``); break;
         case 'octal': e.setTitle('Octal').setDescription(`\`${snip(textToOctal(i.options.getString('text')))}\``); break;
         case 'octaldecode': e.setTitle('Octal Decode').setDescription(`\`${snip(octalToText(i.options.getString('octal')))}\``); break;
         case 'ascii': e.setTitle('ASCII').setDescription(`\`${snip(textToAscii(i.options.getString('text')))}\``); break;
@@ -788,17 +756,7 @@ client.on('interactionCreate', async i => {
         case 'sha512': e.setTitle('SHA-512').setDescription(`\`${sha512(i.options.getString('text'))}\``); break;
         case 'morse': e.setTitle('Morse').setDescription(`\`${snip(textToMorse(i.options.getString('text')))}\``); break;
         case 'morsedecode': e.setTitle('Morse Decode').setDescription(`\`${snip(morseToText(i.options.getString('morse')))}\``); break;
-        case 'caesar': { const s = i.options.getInteger('shift') ?? 3; e.setTitle(`Caesar (shift ${s}) case 'octal': e.setTitle('Octal').setDescription(`\`${snip(textToOctal(i.options.getString('text')))}\``); break;
-        case 'octaldecode': e.setTitle('Octal Decode').setDescription(`\`${snip(octalToText(i.options.getString('octal')))}\``); break;
-        case 'ascii': e.setTitle('ASCII').setDescription(`\`${snip(textToAscii(i.options.getString('text')))}\``); break;
-        case 'asciidecode': e.setTitle('ASCII Decode').setDescription(`\`${snip(asciiToText(i.options.getString('codes')))}\``); break;
-        case 'md5': e.setTitle('MD5').setDescription(`\`${md5(i.options.getString('text'))}\``); break;
-        case 'sha1': e.setTitle('SHA-1').setDescription(`\`${sha1(i.options.getString('text'))}\``); break;
-        case 'sha256': e.setTitle('SHA-256').setDescription(`\`${sha256(i.options.getString('text'))}\``); break;
-        case 'sha512': e.setTitle('SHA-512').setDescription(`\`${sha512(i.options.getString('text'))}\``); break;
-        case 'morse': e.setTitle('Morse').setDescription(`\`${snip(textToMorse(i.options.getString('text')))}\``); break;
-        case 'morsedecode': e.setTitle('Morse Decode').setDescription(`\`${snip(morseToText(i.options.getString('morse')))}\``); break;
-        case 'caesar': { const s = i.options.getInteger('shift') ?? 3; e.setTitle(`Caesar (`).setDescription(`\`${snip(caesar(i.options.getString('text'), s))}\``); break; }
+        case 'caesar': { const s = i.options.getInteger('shift') ?? 3; e.setTitle(`Caesar (shift ${s})`).setDescription(`\`${snip(caesar(i.options.getString('text'), s))}\``); break; }
         case 'caesarbf': e.setTitle('Caesar Brute').setDescription(`\`\`\`${snip(caesarBrute(i.options.getString('text')),1900)}\`\`\``); break;
         case 'vigenere': e.setTitle('Vigenère Encode').setDescription(`\`${snip(vigenereEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
         case 'vigdecode': e.setTitle('Vigenère Decode').setDescription(`\`${snip(vigenereDecode(i.options.getString('text'), i.options.getString('key')))}\``); break;
@@ -811,29 +769,7 @@ client.on('interactionCreate', async i => {
         case 'scytale': { const c = i.options.getInteger('cols') ?? 4; e.setTitle(`Scytale (${c} cols)`).setDescription(`\`${snip(scytaleEncode(i.options.getString('text'), c))}\``); break; }
         case 'scytaledecode': { const c = i.options.getInteger('cols') ?? 4; e.setTitle(`Scytale Decode`).setDescription(`\`${snip(scytaleDecode(i.options.getString('text'), c))}\``); break; }
         case 'columnar': e.setTitle('Columnar Encode').setDescription(`\`${snip(columnarEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
-        case 'columnshift ${s})`).setDescription(`\`${snip(caesar(i.options.getString('text'), s))}\``); break; }
-        case 'caesarbf': e.setTitle('Caesar Brute').setDescription(`\`\`\`${snip(caesarBrute(i.options.getString('text')),1900)}\`\`\``); break;
-        case 'vigenere': e.setTitle('Vigenère Encode').setDescription(`\`${snip(vigenereEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
-        case 'vigdecode': e.setTitle('Vigenère Decode').setDescription(`\`${snip(vigenereDecode(i.options.getString('text'), i.options.getString('key')))}\``); break;
-        case 'xor': e.setTitle('XOR').setDescription(`\`${snip(xorCipher(i.options.getString('text'), i.options.getString('key')))}\``); break;
-        case 'beaufort': e.setTitle('Beaufort').setDescription(`\`${snip(beaufort(i.options.getString('text'), i.options.getString('key')))}\``); break;
-        case 'affine': e.setTitle('Affine Encode').setDescription(`\`${snip(affineEncode(i.options.getString('text'), i.options.getInteger('a'), i.options.getInteger('b')))}\``); break;
-        case 'affinedecode': e.setTitle('Affine Decode').setDescription(`\`${snip(affineDecode(i.options.getString('text'), i.options.getInteger('a'), i.options.getInteger('b')))}\``); break;
-        case 'railfence': { const r = i.options.getInteger('rails') ?? 3; e.setTitle(`Rail Fence (${r} rails)`).setDescription(`\`${snip(railFenceEncode(i.options.getString('text'), r))}\``); break; }
-        case 'railfencedecode': { const r = i.options.getInteger('rails') ?? 3; e.setTitle(`Rail Fence Decode`).setDescription(`\`${snip(railFenceDecode(i.options.getString('text'), r))}\``); break; }
-        case 'scytale': { const c = i.options.getInteger('cols') ?? 4; e.setTitle(`Scytale (${c} cols)`).setDescription(`\`${snip(scytaleEncode(i.options.getString('text'), c))}\``); break; }
-        case 'scytaledecode': { const c = i.options.getInteger('cols') ?? 4; e.setTitle(`Scytale Decode`).setDescription(`\`${snip(scytaleDecode(i.options.getString('text'), c))}\``); break; }
-        case 'columnar': e.setTitle('Columnar Encode').setDescription(`\`${snip(columnarEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
-       ardecode': e.setTitle('Columnar Decode').setDescription(`\`${snip(columnarDecode(i.options.getString('text'), i.options.getString('key')))}\``); break;
-        case 'polybius': e.setTitle('Polybius Encode').setDescription(`\`${snip(polybiusEncode(i.options.getString('text')))}\``); break;
-        case 'polybiusdecode': e.setTitle('Polybius Decode').setDescription(`\`${snip(polybiusDecode(i.options.getString('numbers')))}\``); break;
-        case 'baconian': e.setTitle('Baconian Encode').setDescription(`\`${snip(baconEncode(i.options.getString('text')))}\``); break;
-        case 'baconiandecode': e.setTitle('Baconian Decode').setDescription(`\`${snip(baconDecode(i.options.getString('bacon')))}\``); break;
-        case 'nato': e.setTitle('NATO').setDescription(`\`${snip(toNato(i.options.getString('text')))}\``); break;
-        case 'braille': e.setTitle('Braille').setDescription(`\`${snip(textToBraille(i.options.getString('text')))}\``); break;
-        case 't9': e.setTitle('T9').setDescription(`\`${snip(textToT9(i.options.getString('text')))}\``); break;
-        case 'phone': e.setTitle('Phone Digits').setDescription(`\`${snip(textToPhone(i.options.getString('text')))}\``); break;
-        case 'tapcode': e.setTitle('Tap Code Encode').setDescription(`\`${ case 'columnardecode': e.setTitle('Columnar Decode').setDescription(`\`${snip(columnarDecode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+        case 'columnardecode': e.setTitle('Columnar Decode').setDescription(`\`${snip(columnarDecode(i.options.getString('text'), i.options.getString('key')))}\``); break;
         case 'polybius': e.setTitle('Polybius Encode').setDescription(`\`${snip(polybiusEncode(i.options.getString('text')))}\``); break;
         case 'polybiusdecode': e.setTitle('Polybius Decode').setDescription(`\`${snip(polybiusDecode(i.options.getString('numbers')))}\``); break;
         case 'baconian': e.setTitle('Baconian Encode').setDescription(`\`${snip(baconEncode(i.options.getString('text')))}\``); break;
@@ -846,11 +782,7 @@ client.on('interactionCreate', async i => {
         case 'tapcodedecode': e.setTitle('Tap Code Decode').setDescription(`\`${snip(tapCodeDecode(i.options.getString('code')))}\``); break;
         case 'urlencode': e.setTitle('URL Encode').setDescription(`\`${snip(urlEncode(i.options.getString('text')))}\``); break;
         case 'urldecode': e.setTitle('URL Decode').setDescription(`\`${snip(urlDecode(i.options.getString('text')))}\``); break;
-        case 'htmlencode': e.setTitle('HTML Encode').snip(tapCodeEncode(i.options.getString('text')))}\``); break;
-        case 'tapcodedecode': e.setTitle('Tap Code Decode').setDescription(`\`${snip(tapCodeDecode(i.options.getString('code')))}\``); break;
-        case 'urlencode': e.setTitle('URL Encode').setDescription(`\`${snip(urlEncode(i.options.getString('text')))}\``); break;
-        case 'urldecode': e.setTitle('URL Decode').setDescription(`\`${snip(urlDecode(i.options.getString('text')))}\``); break;
-        case 'htmlencode': e.setTitle('HTML Encode').setDescription(`\setDescription(`\`${snip(htmlEncode(i.options.getString('text')))}\``); break;
+        case 'htmlencode': e.setTitle('HTML Encode').setDescription(`\`${snip(htmlEncode(i.options.getString('text')))}\``); break;
         case 'htmldecode': e.setTitle('HTML Decode').setDescription(`\`${snip(htmlDecode(i.options.getString('text')))}\``); break;
         case 'gronsfeld': e.setTitle('Gronsfeld Encode').setDescription(`\`${snip(gronsfeldEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
         case 'gronsfelddecode': e.setTitle('Gronsfeld Decode').setDescription(`\`${snip(gronsfeldDecode(i.options.getString('text'), i.options.getString('key')))}\``); break;
@@ -862,37 +794,7 @@ client.on('interactionCreate', async i => {
         case 'manage_requests':
         case 'whitelist_server':
         case 'whitelist_game':
-            e.setTitle('ℹ️ Command').setDescription(`/${i.commandName} is available but full handling not shown for brevity.`);
-            break;
-
-        default:
-            e.setTitle('ℹ️ Command').setDescription(`/${i.commandName} executed!`);
-    }
-
-    if (i.deferred && !i.replied) await i.editReply({ embeds: [e] });
-});
-
-// ========== Missing helpers ==========
-async function getRobloxUser(username) {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 6000);
-    try {
-        const res = await fetch('https://users.roblox.com/v1/usernames/users', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ usernames: [username]`${snip(htmlEncode(i.options.getString('text')))}\``); break;
-        case 'htmldecode': e.setTitle('HTML Decode').setDescription(`\`${snip(htmlDecode(i.options.getString('text')))}\``); break;
-        case 'gronsfeld': e.setTitle('Gronsfeld Encode').setDescription(`\`${snip(gronsfeldEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
-        case 'gronsfelddecode': e.setTitle('Gronsfeld Decode').setDescription(`\`${snip(gronsfeldDecode(i.options.getString('text'), i.options.getString('key')))}\``); break;
-        case 'autokey': e.setTitle('Autokey Encode').setDescription(`\`${snip(autokeyEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
-
-        // ----- Placeholder for less-used commands -----
-        case 'menu':
-        case 'request_game':
-        case 'manage_requests':
-        case 'whitelist_server':
-        case 'whitelist_game':
-            e.setTitle('ℹ️ Command').setDescription(`/${i.commandName} is available but full handling not shown for brevity.`);
+            e.setTitle('ℹ️ Command').setDescription(`/${i.commandName} is available.`);
             break;
 
         default:
@@ -911,22 +813,6 @@ async function getRobloxUser(username) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ usernames: [username] }),
-            signal: ctrl.signal
-        });
-        clearTimeout(t);
-        const json = await res.json();
-        return json.data?.[0];
-    } catch (e) {
-        clearTimeout(t);
-        return null;
-    }
-}
-
-async function bruteForceRoblox(id) {
-    const endpoints = {
-        gameInfo: `https://games.roblox.com/v1/games?universeIds=${id}`,
-        userV1: `https://users.roblox.com/v1/users/${id}`,
-        groupV1: `https://groups.roblox.com/v1 }),
             signal: ctrl.signal
         });
         clearTimeout(t);
