@@ -1,6 +1,5 @@
 const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes,
     SlashCommandBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 const readline = require('readline');
 const fs = require('fs');
 const crypto = require('crypto');
