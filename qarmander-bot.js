@@ -1,7 +1,23 @@
+const { Client, GatewayIntentBits, EmbedBuilder, REST, Routes,
+    SlashCommandBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const readline = require('readline');
 const fs = require('fs');
 const crypto = require('crypto');
+const http = require('http');
 
-// ── Load Sacred-Stuff.env if it exists ───────────────────────────────────────
+// ============================================
+// CONSOLE SETUP
+// ============================================
+const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    terminal: true
+});
+
+// ============================================
+// LOAD ENVIRONMENT VARIABLES
+// ============================================
 if (fs.existsSync("./Sacred-Stuff.env")) {
     const envFile = fs.readFileSync("./Sacred-Stuff.env", "utf8");
     envFile.split("\n").forEach(line => {
@@ -12,40 +28,55 @@ if (fs.existsSync("./Sacred-Stuff.env")) {
     });
     console.log('✅ Sacred-Stuff.env loaded');
 } else {
-    console.log('⚠️ Sacred-Stuff.env not found, using system environment variables');
+    console.log('⚠️ Sacred-Stuff.env not found');
 }
 
-// ── Diagnostic (remove after confirming token loads) ─────────────────────────
 console.log('=== ENVIRONMENT DIAGNOSTIC ===');
-console.log('DISCORD_TOKEN from env:', process.env.DISCORD_TOKEN ? `present (length: ${process.env.DISCORD_TOKEN.length})` : 'MISSING');
-console.log('CLIENT_ID from env:', process.env.CLIENT_ID || 'MISSING');
-console.log('Sacred-Stuff.env exists?', fs.existsSync('./Sacred-Stuff.env'));
-if (fs.existsSync('./Sacred-Stuff.env')) {
-    const content = fs.readFileSync('./Sacred-Stuff.env', 'utf8');
-    console.log('File has lines:', content.split('\n').length);
-    console.log('Contains DISCORD_TOKEN?', content.includes('DISCORD_TOKEN'));
-}
+console.log('DISCORD_TOKEN:', process.env.DISCORD_TOKEN ? '✅ Present' : '❌ MISSING');
+console.log('CLIENT_ID:', process.env.CLIENT_ID ? '✅ Present' : '❌ MISSING');
+console.log('GEMINI_API_KEY:', process.env.GEMINI_API_KEY ? '✅ Present' : '❌ MISSING');
 console.log('================================');
 
-const {
-    Client, GatewayIntentBits, EmbedBuilder, REST, Routes,
-    SlashCommandBuilder, ActionRowBuilder, StringSelectMenuBuilder, ButtonBuilder, ButtonStyle
-} = require('discord.js');
+// ============================================
+// GEMINI AI SETUP (for /ask command)
+// ============================================
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+let genAI = null;
+let aiModel = null;
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMessages] });
-const http = require('http');
+if (GEMINI_API_KEY) {
+    try {
+        genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+        aiModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        console.log('🤖 Gemini AI is READY!');
+    } catch (error) {
+        console.log('❌ Failed to initialize Gemini AI:', error.message);
+    }
+} else {
+    console.log('⚠️ GEMINI_API_KEY not found - /ask command disabled');
+}
 
-// ── Keep-alive server (for Replit / UptimeRobot) ─────────────────────────────
+// ============================================
+// CLIENT SETUP
+// ============================================
+const client = new Client({ 
+    intents: [
+        GatewayIntentBits.Guilds,
+        GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.MessageContent
+    ] 
+});
+
 http.createServer((req, res) => { res.writeHead(200); res.end('Qarmander is alive!'); }).listen(5000, '0.0.0.0');
 
-// ── Stats ─────────────────────────────────────────────────────────────────────
+// Stats
 const STATS_FILE = './bot-stats.json';
 function loadStats() { try { return JSON.parse(fs.readFileSync(STATS_FILE, 'utf8')); } catch { return { startCount: 0 }; } }
 function saveStats(stats) { fs.writeFileSync(STATS_FILE, JSON.stringify(stats, null, 2)); }
 const botStats = loadStats();
 const startTime = Date.now();
 
-// ── Guild Whitelist (hardcoded + dynamic file) ───────────────────────────────
+// Guild Whitelist
 const HARDCODED_GUILDS = ['1493304887252091061', '1502798100673335507'];
 const GUILDS_FILE = './allowed-guilds.json';
 
@@ -60,11 +91,13 @@ function getAllowedGuilds() {
     return [...new Set([...HARDCODED_GUILDS, ...dynamic])];
 }
 
-const BOT_ADMINS = ['1343208613430300744', '871464358817959946']; // spanishrobey, gasheper
+const BOT_ADMINS = ['1343208613430300744', '871464358817959946'];
 
-// ── Game Watcher ──────────────────────────────────────────────────────────────
-const WATCHED_FILE   = './watched-games.json';
-const WATCH_INTERVAL = 5 * 60 * 1000;
+// Game Watcher
+const WATCHED_FILE = './watched-games.json';
+const REQUESTS_FILE = './game-requests.json';
+const POLL_MS = 30_000;
+const sentAlerts = new Set();
 
 function loadWatched() {
     try { return JSON.parse(fs.readFileSync(WATCHED_FILE, 'utf8')); }
@@ -72,16 +105,12 @@ function loadWatched() {
 }
 function saveWatched(arr) { fs.writeFileSync(WATCHED_FILE, JSON.stringify(arr, null, 2)); }
 
-// ── Game Requests System ─────────────────────────────────────────────────────
-const REQUESTS_FILE = './game-requests.json';
-
 function loadRequests() {
     try { return JSON.parse(fs.readFileSync(REQUESTS_FILE, 'utf8')); }
     catch { return []; }
 }
 function saveRequests(arr) { fs.writeFileSync(REQUESTS_FILE, JSON.stringify(arr, null, 2)); }
 
-// Helper: resolve place ID to universe ID
 async function getUniverseFromPlace(placeId) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 6000);
@@ -97,6 +126,7 @@ async function getUniverseFromPlace(placeId) {
 }
 
 // ========== ALL CIPHER FUNCTIONS ==========
+function snip(s, max = 1900) { return String(s).slice(0, max) + (String(s).length > max ? '…' : ''); }
 function rot13(t) { return t.replace(/[A-Za-z]/g, c => String.fromCharCode((c.charCodeAt(0) - (c < 'a' ? 65 : 97) + 13) % 26 + (c < 'a' ? 65 : 97))); }
 function rot47(t) { return t.replace(/[\x21-\x7E]/g, c => String.fromCharCode(((c.charCodeAt(0) - 33 + 47) % 94) + 33)); }
 function atbash(t) { return t.replace(/[A-Za-z]/g, c => String.fromCharCode((c < 'a' ? 90 : 122) - (c.charCodeAt(0) - (c < 'a' ? 65 : 97)))); }
@@ -159,210 +189,172 @@ function tapCodeDecode(t) { const grid = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'; return t.
 function gronsfeldEncode(t, key) { key = key.replace(/[^0-9]/g,''); if (!key.length) return t; let ki = 0; return t.replace(/[A-Za-z]/g, c => { const b = c < 'a' ? 65 : 97; return String.fromCharCode((c.charCodeAt(0) - b + parseInt(key[ki++ % key.length])) % 26 + b); }); }
 function gronsfeldDecode(t, key) { key = key.replace(/[^0-9]/g,''); if (!key.length) return t; let ki = 0; return t.replace(/[A-Za-z]/g, c => { const b = c < 'a' ? 65 : 97; return String.fromCharCode((c.charCodeAt(0) - b - parseInt(key[ki++ % key.length]) + 26) % 26 + b); }); }
 function autokeyEncode(t, key) { key = key.toUpperCase().replace(/[^A-Z]/g,''); if (!key.length) return t; let fullKey = key + t.toUpperCase().replace(/[^A-Z]/g,''); let ki = 0; return t.replace(/[A-Za-z]/g, c => { const b = c < 'a' ? 65 : 97; const s = fullKey[ki++ % fullKey.length].charCodeAt(0) - 65; return String.fromCharCode((c.charCodeAt(0) - b + s) % 26 + b); }); }
-function snip(s, max = 1900) { return String(s).slice(0, max) + (String(s).length > max ? '…' : ''); }
 
 // ========== ROBLOX HELPERS ==========
-async function rblxGet(url) {
+async function getGameInfo(universeId) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 6000);
     try {
-        const res = await fetch(url, { signal: ctrl.signal });
+        const res = await fetch(`https://games.roblox.com/v1/games?universeIds=${universeId}`, { signal: ctrl.signal });
         clearTimeout(t);
-        return { ok: res.ok, status: res.status, data: res.ok ? await res.json() : null };
-    } catch (e) {
-        clearTimeout(t);
-        return { ok: false, status: 0, error: e.message };
-    }
-}
-
-async function getGameInfo(universeId) {
-    const r = await rblxGet(`https://games.roblox.com/v1/games?universeIds=${universeId}`);
-    return r.ok ? r.data?.data?.[0] : null;
+        if (res.ok) {
+            const data = await res.json();
+            return data.data?.[0];
+        }
+    } catch (e) { clearTimeout(t); }
+    return null;
 }
 
 async function getSubplaces(universeId) {
-    const r = await rblxGet(`https://develop.roblox.com/v1/universes/${universeId}/places?isUniverseCreation=false&limit=50`);
-    if (!r.ok || !r.data?.data) return [];
-    return r.data.data.map(p => ({
-        placeId: p.id,
-        name: p.name,
-        description: p.description || '',
-        updated: p.updated || null,
-    }));
-}
-
-async function getRobloxUser(username) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 6000);
+    let placeIds = [];
     try {
-        const res = await fetch('https://users.roblox.com/v1/usernames/users', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ usernames: [username] }),
-            signal: ctrl.signal
-        });
+        const res = await fetch(`https://develop.roblox.com/v1/universes/${universeId}/places?isUniverseCreation=false&limit=50`, { signal: ctrl.signal });
         clearTimeout(t);
-        const json = await res.json();
-        return json.data?.[0];
-    } catch (e) {
-        clearTimeout(t);
-        return null;
-    }
-}
-
-async function bruteForceRoblox(id) {
-    const endpoints = {
-        gameInfo:      `https://games.roblox.com/v1/games?universeIds=${id}`,
-        userV1:        `https://users.roblox.com/v1/users/${id}`,
-        groupV1:       `https://groups.roblox.com/v1/groups/${id}`,
-        assetV1:       `https://economy.roblox.com/v2/assets/${id}/details`,
-        placeV1:       `https://api.roblox.com/places/info?placeId=${id}`,
-        userFriends:   `https://friends.roblox.com/v1/users/${id}/friends/count`,
-        userFollowers: `https://friends.roblox.com/v1/users/${id}/followers/count`,
-        userFollowing: `https://friends.roblox.com/v1/users/${id}/followings/count`,
-        userGroups:    `https://groups.roblox.com/v2/users/${id}/groups/roles`,
-        userBadges:    `https://badges.roblox.com/v1/users/${id}/badges?limit=10`,
-        userAvatar:    `https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${id}&size=420x420&format=Png`,
-        userInventory: `https://inventory.roblox.com/v1/users/${id}/assets?limit=10`,
-        groupMembers:  `https://groups.roblox.com/v1/groups/${id}/members`,
-        groupShout:    `https://groups.roblox.com/v1/groups/${id}/shout`,
-        groupRoles:    `https://groups.roblox.com/v1/groups/${id}/roles`,
-        groupWall:     `https://groups.roblox.com/v1/groups/${id}/wall/posts?limit=5`,
-        groupGames:    `https://games.roblox.com/v1/groups/${id}/games`,
-        badgeV1:       `https://badges.roblox.com/v1/badges/${id}`,
-        badgeStats:    `https://badges.roblox.com/v1/badges/${id}/stats`,
-        bundleV1:      `https://economy.roblox.com/v1/bundles/${id}/details`,
-        gameServers:   `https://games.roblox.com/v1/games/${id}/servers/Public`,
-        gameFavorites: `https://games.roblox.com/v1/games/${id}/favorites`,
-        gameVotes:     `https://games.roblox.com/v1/games/votes?universeIds=${id}`,
-        gameBadges:    `https://badges.roblox.com/v1/universes/${id}/badges`,
-        gamePasses:    `https://games.roblox.com/v1/games/${id}/game-passes`,
-        universeV1:    `https://apis.roblox.com/universes/v1/universes/${id}`,
-        catalogItem:   `https://catalog.roblox.com/v1/catalog/items/details?itemType=Asset&id=${id}`
-    };
-    const results = {};
-    for (const [name, url] of Object.entries(endpoints)) {
-        try {
-            const ctrl = new AbortController();
-            const tId = setTimeout(() => ctrl.abort(), 5000);
-            const res = await fetch(url, { signal: ctrl.signal });
-            clearTimeout(tId);
-            results[name] = res.ok ? { success: true, status: res.status, data: await res.json() } : { success: false, status: res.status };
-        } catch (err) {
-            results[name] = { success: false, error: err.message };
+        if (res.ok) {
+            const data = await res.json();
+            placeIds = (data.data || []).map(p => p.id);
         }
+    } catch (e) { clearTimeout(t); }
+
+    const game = await getGameInfo(universeId);
+    if (game?.rootPlaceId && !placeIds.includes(game.rootPlaceId)) placeIds.unshift(game.rootPlaceId);
+    if (!placeIds.length) return [];
+
+    const results = [];
+    const chunkSize = 10;
+    for (let i = 0; i < placeIds.length; i += chunkSize) {
+        const chunk = placeIds.slice(i, i + chunkSize);
+        const ctrl2 = new AbortController();
+        const t2 = setTimeout(() => ctrl2.abort(), 6000);
+        try {
+            const ids = chunk.join('&placeIds=');
+            const r = await fetch(`https://games.roblox.com/v1/games/multiget-place-details?placeIds=${ids}`, { signal: ctrl2.signal });
+            clearTimeout(t2);
+            if (r.ok) {
+                const data = await r.json();
+                for (const place of (data || [])) {
+                    results.push({ id: place.placeId, name: place.name || `Place ${place.placeId}`, updated: String(place.currentVersion ?? place.versionNumber ?? ''), universeId: String(place.universeId ?? universeId) });
+                }
+            }
+        } catch (e) { clearTimeout(t2); }
+    }
+
+    const foundIds = new Set(results.map(r => String(r.id)));
+    const missing = placeIds.filter(id => !foundIds.has(String(id)));
+    for (const pid of missing) {
+        const ctrl3 = new AbortController();
+        const t3 = setTimeout(() => ctrl3.abort(), 5000);
+        try {
+            const r = await fetch(`https://games.roblox.com/v1/games/multiget-place-details?placeIds=${pid}`, { signal: ctrl3.signal });
+            clearTimeout(t3);
+            if (r.ok) {
+                const data = await r.json();
+                const place = data?.[0];
+                if (place) results.push({ id: place.placeId, name: place.name || `Place ${pid}`, updated: String(place.currentVersion ?? ''), universeId: String(universeId) });
+            }
+        } catch (e) { clearTimeout(t3); }
     }
     return results;
 }
 
-// ── Game Watcher Logic ────────────────────────────────────────────────────────
 async function checkWatchedGames() {
     const watched = loadWatched();
     if (!watched.length) return;
-
-    for (const entry of watched) {
+    let dirty = false;
+    await Promise.all(watched.map(async entry => {
         try {
             const game = await getGameInfo(entry.universeId);
-            if (!game) continue;
-
-            const alerts = [];
-
-            const newUpdated = game.updated;
-            if (entry.lastUpdated && newUpdated !== entry.lastUpdated) {
-                alerts.push({
-                    type: '🔄 Game Updated',
-                    desc: `**${game.name}** was updated!\n**Previous:** ${entry.lastUpdated}\n**Now:** ${newUpdated}\n**Visits:** ${game.visits?.toLocaleString() ?? 'N/A'}\n**Playing:** ${game.playing?.toLocaleString() ?? 'N/A'}\n[Open Game](https://www.roblox.com/games/${game.rootPlaceId})`,
-                    thumb: `https://www.roblox.com/asset-thumbnail/image?assetId=${game.rootPlaceId}&width=512&height=512&format=png`
-                });
-                entry.lastUpdated = newUpdated;
-            }
-
-            const subplaces = await getSubplaces(entry.universeId);
-            if (!entry.subplaces) entry.subplaces = [];
-
-            for (const sp of subplaces) {
-                const existing = entry.subplaces.find(s => s.placeId === sp.placeId);
-                if (!existing) {
-                    alerts.push({
-                        type: '🆕 New Subplace Detected',
-                        desc: `A new subplace was found in **${game.name}**!\n**Place:** ${sp.name}\n**Place ID:** \`${sp.placeId}\`\n**Updated:** ${sp.updated ?? 'Unknown'}\n[Open Place](https://www.roblox.com/games/${sp.placeId})`,
-                        thumb: null
-                    });
-                    entry.subplaces.push({ placeId: sp.placeId, name: sp.name, lastUpdated: sp.updated });
-                } else if (existing.lastUpdated && sp.updated && sp.updated !== existing.lastUpdated) {
-                    alerts.push({
-                        type: '🔧 Subplace Updated',
-                        desc: `A subplace in **${game.name}** was updated!\n**Place:** ${sp.name}\n**Place ID:** \`${sp.placeId}\`\n**Previous:** ${existing.lastUpdated}\n**Now:** ${sp.updated}\n[Open Place](https://www.roblox.com/games/${sp.placeId})`,
-                        thumb: null
-                    });
-                    existing.lastUpdated = sp.updated;
-                }
-            }
-
-            if (alerts.length) {
-                const channel = await client.channels.fetch(entry.channelId).catch(() => null);
+            if (!game) return;
+            const channel = await client.channels.fetch(entry.channelId).catch(() => null);
+            const alertKey = `${entry.universeId}:${game.updated}`;
+            if (game.updated && entry.lastUpdated && game.updated !== entry.lastUpdated && !sentAlerts.has(alertKey)) {
+                sentAlerts.add(alertKey);
                 if (channel) {
-                    for (const alert of alerts) {
-                        const embed = new EmbedBuilder()
-                            .setColor(0xf59e0b)
-                            .setTitle(alert.type)
-                            .setDescription(alert.desc)
-                            .setTimestamp()
-                            .setFooter({ text: `Universe ID: ${entry.universeId}` });
-                        if (alert.thumb) embed.setThumbnail(alert.thumb);
-                        await channel.send({ embeds: [embed] }).catch(() => {});
-                    }
+                    const embed = new EmbedBuilder().setColor(0xf59e0b).setTitle('🔄 Game Updated!').setDescription(`**[${game.name}](https://www.roblox.com/games/${game.rootPlaceId})** just pushed an update!`).setThumbnail(`https://www.roblox.com/asset-thumbnail/image?assetId=${game.rootPlaceId}&width=512&height=512&format=png`).addFields({ name: '🕒 Previous', value: entry.lastUpdated ?? 'Unknown', inline: true }, { name: '🕒 Now', value: game.updated ?? 'Unknown', inline: true }, { name: '👥 Playing', value: game.playing?.toLocaleString() ?? 'N/A', inline: true }, { name: '🏆 Visits', value: game.visits?.toLocaleString() ?? 'N/A', inline: true }, { name: '🔗 Open', value: `[Click here](https://www.roblox.com/games/${game.rootPlaceId})` }).setTimestamp().setFooter({ text: `Universe ID: ${entry.universeId}` });
+                    await channel.send({ embeds: [embed] }).catch(() => {});
                 }
+                entry.lastUpdated = game.updated;
+                dirty = true;
+            } else if (!entry.lastUpdated && game.updated) { entry.lastUpdated = game.updated; dirty = true; }
+            const subplaces = await getSubplaces(entry.universeId);
+            if (!entry.subplaces) { entry.subplaces = []; dirty = true; }
+            for (const sp of subplaces) {
+                const existing = entry.subplaces.find(s => String(s.placeId) === String(sp.id));
+                if (!existing) {
+                    const subKey = `${entry.universeId}:sub:${sp.id}:new`;
+                    if (!sentAlerts.has(subKey)) {
+                        sentAlerts.add(subKey);
+                        if (channel) {
+                            const embed = new EmbedBuilder().setColor(0x10b981).setTitle('🆕 New Subplace Detected!').setDescription(`A new subplace was found in **${game.name}**!`).addFields({ name: '📦 Name', value: sp.name ?? 'Unknown', inline: true }, { name: '🆔 Place ID', value: `\`${sp.id}\``, inline: true }, { name: '🕒 Updated', value: sp.updated ?? 'Unknown', inline: true }, { name: '🔗 Open', value: `[Click here](https://www.roblox.com/games/${sp.id})` }).setTimestamp().setFooter({ text: `Universe ID: ${entry.universeId}` });
+                            await channel.send({ embeds: [embed] }).catch(() => {});
+                        }
+                        entry.subplaces.push({ placeId: sp.id, name: sp.name, lastUpdated: sp.updated });
+                        dirty = true;
+                    }
+                } else if (sp.updated && existing.lastUpdated && sp.updated !== existing.lastUpdated) {
+                    const subKey = `${entry.universeId}:sub:${sp.id}:${sp.updated}`;
+                    if (!sentAlerts.has(subKey)) {
+                        sentAlerts.add(subKey);
+                        if (channel) {
+                            const embed = new EmbedBuilder().setColor(0x06b6d4).setTitle('🔧 Subplace Updated!').setDescription(`A subplace in **${game.name}** was updated!`).addFields({ name: '📦 Name', value: sp.name ?? 'Unknown', inline: true }, { name: '🆔 Place ID', value: `\`${sp.id}\``, inline: true }, { name: '🕒 Previous', value: existing.lastUpdated, inline: true }, { name: '🕒 Now', value: sp.updated, inline: true }, { name: '🔗 Open', value: `[Click here](https://www.roblox.com/games/${sp.id})` }).setTimestamp().setFooter({ text: `Universe ID: ${entry.universeId}` });
+                            await channel.send({ embeds: [embed] }).catch(() => {});
+                        }
+                        existing.lastUpdated = sp.updated;
+                        existing.name = sp.name;
+                        dirty = true;
+                    }
+                } else if (!existing.lastUpdated && sp.updated) { existing.lastUpdated = sp.updated; dirty = true; }
             }
-        } catch (err) {
-            console.error(`[GameWatcher] Error checking ${entry.universeId}:`, err.message);
-        }
+        } catch (err) { console.error(`[Watcher] Error checking ${entry.universeId}:`, err.message); }
+    }));
+    if (dirty) saveWatched(watched);
+}
+
+async function watcherLoop() {
+    while (true) {
+        await checkWatchedGames();
+        await new Promise(r => setTimeout(r, POLL_MS));
     }
-    saveWatched(watched);
 }
 
 // ========== SLASH COMMANDS ==========
 const commands = [
-    // ── Track Command ──────────────────────────────────────────────────────
-    new SlashCommandBuilder()
-        .setName('track')
-        .setDescription('Request to track a Roblox game (sends request to owners)')
-        .addStringOption(o => 
-            o.setName('universe_id')
-                .setDescription('Roblox Universe ID')
-                .setRequired(false))
-        .addStringOption(o => 
-            o.setName('place_id')
-                .setDescription('Roblox Place ID (will resolve to universe)')
-                .setRequired(false)),
-    
-    // ── Request System ──────────────────────────────────────────────────────
     new SlashCommandBuilder().setName('help').setDescription('Show all Qarmander commands'),
-    new SlashCommandBuilder().setName('request_game')
-        .setDescription('Suggest a Roblox game to be monitored (for owners to review)')
-        .addStringOption(o => o.setName('universe_id').setDescription('Roblox Universe ID').setRequired(false))
-        .addStringOption(o => o.setName('place_id').setDescription('Roblox Place ID (will resolve to universe)').setRequired(false)),
-    new SlashCommandBuilder().setName('manage_requests')
-        .setDescription('Browse, approve, or reject game requests (owners only)')
-        .addStringOption(o => o.setName('action').setDescription('Action to perform').setRequired(true)
-            .addChoices(
-                { name: 'list', value: 'list' },
-                { name: 'approve', value: 'approve' },
-                { name: 'reject', value: 'reject' },
-                { name: 'browse', value: 'browse' }
-            ))
-        .addStringOption(o => o.setName('request_id').setDescription('Request ID (for approve/reject)').setRequired(false)),
-    new SlashCommandBuilder().setName('whitelist_server').setDescription('Add/remove server from whitelist (bot admins only)')
-        .addStringOption(o => o.setName('action').setDescription('add or remove').setRequired(true).addChoices({ name:'add', value:'add' }, { name:'remove', value:'remove' }))
-        .addStringOption(o => o.setName('guild_id').setDescription('Discord Guild ID').setRequired(true)),
-    new SlashCommandBuilder().setName('whitelist_game').setDescription('Watch a Roblox game for updates (bot admins only)')
-        .addStringOption(o => o.setName('action').setDescription('add, remove, list, change_channel').setRequired(true).addChoices({ name:'add', value:'add' }, { name:'remove', value:'remove' }, { name:'list', value:'list' }, { name:'change_channel', value:'change_channel' }))
-        .addStringOption(o => o.setName('universe_id').setDescription('Roblox Universe ID').setRequired(false))
-        .addStringOption(o => o.setName('channel').setDescription('Channel ID for alerts').setRequired(false)),
+    new SlashCommandBuilder().setName('ping').setDescription('Check bot latency'),
+    new SlashCommandBuilder().setName('ask').setDescription('Ask Qarmander anything using AI').addStringOption(o => o.setName('question').setDescription('Your question').setRequired(true)),
+    new SlashCommandBuilder().setName('botstats').setDescription('Show bot statistics'),
+    new SlashCommandBuilder().setName('menu').setDescription('Open interactive menu'),
+
+    // Roblox search commands (using fetch, no noblox)
+    new SlashCommandBuilder().setName('gamesearch').setDescription('Search for a Roblox game by name').addStringOption(o => o.setName('query').setDescription('Game name').setRequired(true)),
+    new SlashCommandBuilder().setName('robloxuserinfo').setDescription('Get info about a Roblox user by username').addStringOption(o => o.setName('username').setDescription('Roblox username').setRequired(true)),
+    new SlashCommandBuilder().setName('robloxuserid').setDescription('Get info about a Roblox user by ID').addStringOption(o => o.setName('userid').setDescription('Roblox user ID').setRequired(true)),
+    new SlashCommandBuilder().setName('groupinfo').setDescription('Get info about a Roblox group').addStringOption(o => o.setName('groupid').setDescription('Roblox group ID').setRequired(true)),
+    new SlashCommandBuilder().setName('assetinfo').setDescription('Get info about a Roblox asset').addStringOption(o => o.setName('assetid').setDescription('Asset ID').setRequired(true)),
+
+    // Soggy image command
+    new SlashCommandBuilder()
+        .setName('sogme')
+        .setDescription('Get a random soggy image')
+        .addStringOption(option =>
+            option.setName('query')
+                .setDescription('Search for a specific image (optional)')
+                .setRequired(false)
+        ),
+
+    // Original Roblox commands
+    new SlashCommandBuilder().setName('request_game').setDescription('Suggest a Roblox game to be monitored').addStringOption(o => o.setName('universe_id').setDescription('Roblox Universe ID').setRequired(false)).addStringOption(o => o.setName('place_id').setDescription('Roblox Place ID').setRequired(false)),
+    new SlashCommandBuilder().setName('manage_requests').setDescription('Browse, approve, or reject game requests (owners only)').addStringOption(o => o.setName('action').setDescription('Action').setRequired(true).addChoices({ name:'list', value:'list' }, { name:'approve', value:'approve' }, { name:'reject', value:'reject' }, { name:'browse', value:'browse' })).addStringOption(o => o.setName('request_id').setDescription('Request ID').setRequired(false)),
+    new SlashCommandBuilder().setName('whitelist_server').setDescription('Add/remove server from whitelist (bot admins only)').addStringOption(o => o.setName('action').setDescription('add or remove').setRequired(true).addChoices({ name:'add', value:'add' }, { name:'remove', value:'remove' })).addStringOption(o => o.setName('guild_id').setDescription('Discord Guild ID').setRequired(true)),
+    new SlashCommandBuilder().setName('whitelist_game').setDescription('Watch a Roblox game for updates (bot admins only)').addStringOption(o => o.setName('action').setDescription('add, remove, list, change_channel').setRequired(true).addChoices({ name:'add', value:'add' }, { name:'remove', value:'remove' }, { name:'list', value:'list' }, { name:'change_channel', value:'change_channel' })).addStringOption(o => o.setName('universe_id').setDescription('Roblox Universe ID').setRequired(false)).addStringOption(o => o.setName('channel').setDescription('Channel ID for alerts').setRequired(false)),
     new SlashCommandBuilder().setName('subplaces').setDescription('List all subplaces in a Roblox universe').addStringOption(o => o.setName('universe_id').setDescription('Universe ID').setRequired(true)),
     new SlashCommandBuilder().setName('brute_link').setDescription('Brute force a Roblox ID against all APIs').addStringOption(o => o.setName('id').setDescription('Roblox ID').setRequired(true)),
     new SlashCommandBuilder().setName('robloxgame').setDescription('Look up a Roblox game by Universe ID').addStringOption(o => o.setName('id').setDescription('Universe ID').setRequired(true)),
     new SlashCommandBuilder().setName('robloxuser').setDescription('Look up a Roblox user by username').addStringOption(o => o.setName('username').setDescription('Roblox username').setRequired(true)),
+
+    // Cipher commands
     new SlashCommandBuilder().setName('rot13').setDescription('ROT13 encode/decode').addStringOption(o => o.setName('text').setDescription('Text').setRequired(true)),
     new SlashCommandBuilder().setName('rot47').setDescription('ROT47 cipher').addStringOption(o => o.setName('text').setDescription('Text').setRequired(true)),
     new SlashCommandBuilder().setName('atbash').setDescription('Atbash cipher').addStringOption(o => o.setName('text').setDescription('Text').setRequired(true)),
@@ -414,236 +406,48 @@ const commands = [
     new SlashCommandBuilder().setName('gronsfeld').setDescription('Gronsfeld encode').addStringOption(o => o.setName('text').setDescription('Text').setRequired(true)).addStringOption(o => o.setName('key').setDescription('Numeric key').setRequired(true)),
     new SlashCommandBuilder().setName('gronsfelddecode').setDescription('Gronsfeld decode').addStringOption(o => o.setName('text').setDescription('Text').setRequired(true)).addStringOption(o => o.setName('key').setDescription('Numeric key').setRequired(true)),
     new SlashCommandBuilder().setName('autokey').setDescription('Autokey encode').addStringOption(o => o.setName('text').setDescription('Text').setRequired(true)).addStringOption(o => o.setName('key').setDescription('Key').setRequired(true)),
-    new SlashCommandBuilder().setName('botstats').setDescription('Show bot statistics'),
-    new SlashCommandBuilder().setName('menu').setDescription('Open interactive menu'),
 ];
 
-const TOKEN = process.env.DISCORD_TOKEN;
-const CLIENT_ID = process.env.CLIENT_ID;
-
-// ── Validate token before starting ───────────────────────────────────────────
-if (!TOKEN) {
-    console.error('❌ FATAL: DISCORD_TOKEN is missing!');
-    console.error('   Please set DISCORD_TOKEN in Sacred-Stuff.env or GitHub Secrets');
-    process.exit(1);
-}
-if (!CLIENT_ID) {
-    console.error('❌ FATAL: CLIENT_ID is missing!');
-    console.error('   Please set CLIENT_ID in Sacred-Stuff.env or GitHub Secrets');
-    process.exit(1);
-}
-if (!TOKEN.match(/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/)) {
-    console.error('❌ FATAL: DISCORD_TOKEN format looks invalid!');
-    console.error('   Token should have three parts separated by dots.');
-    process.exit(1);
-}
-console.log(`✅ Token validated (length: ${TOKEN.length})`);
-console.log(`✅ Client ID: ${CLIENT_ID}`);
-
+// ============================================
+// READY EVENT
+// ============================================
 client.once('ready', async () => {
     botStats.startCount++;
     saveStats(botStats);
     console.log(`✅ Qarmander online as ${client.user.tag} | Start #${botStats.startCount}`);
+    console.log(`🤖 /ask command: ${aiModel ? 'ENABLED' : 'DISABLED'}`);
 
-    const rest = new REST({ version: '10' }).setToken(TOKEN);
-    await rest.put(Routes.applicationCommands(CLIENT_ID), { body: commands.map(c => c.toJSON()) });
+    const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
+    await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), { body: commands.map(c => c.toJSON()) });
     console.log(`📋 Registered ${commands.length} commands`);
 
-    setInterval(checkWatchedGames, WATCH_INTERVAL);
-    console.log(`🎮 Game watcher started (every ${WATCH_INTERVAL / 60000} min)`);
+    watcherLoop();
+    console.log(`🎮 Game watcher started (polling every ${POLL_MS/1000}s)`);
 
-    // Uptime status updater
+    const CONSOLE_CHANNEL_ID = '1493304893405134931';
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.log('💬 CONSOLE MODE ACTIVE');
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    rl.on('line', async (input) => {
+        if (input.toLowerCase() === 'exit') process.exit(0);
+        if (input.trim()) {
+            try {
+                const channel = await client.channels.fetch(CONSOLE_CHANNEL_ID);
+                if (channel) await channel.send(input);
+            } catch(e) {}
+        }
+    });
+
     function updateUptimeStatus() {
-        const uptimeSeconds = Math.floor(process.uptime());
-        const days = Math.floor(uptimeSeconds / 86400);
-        const hours = Math.floor((uptimeSeconds % 86400) / 3600);
-        const minutes = Math.floor((uptimeSeconds % 3600) / 60);
-        let uptimeString = '';
-        if (days > 0) uptimeString += `${days}d `;
-        if (hours > 0 || days > 0) uptimeString += `${hours}h `;
-        uptimeString += `${minutes}m`;
-        client.user.setPresence({
-            activities: [{ name: `Uptime: ${uptimeString}`, type: 3 }],
-            status: 'online'
-        });
+        client.user.setPresence({ activities: [{ name: `${commands.length} commands`, type: 3 }], status: 'online' });
     }
     updateUptimeStatus();
     setInterval(updateUptimeStatus, 60000);
 });
 
-// ── MESSAGE COMMANDS (!track, !help, etc.) ────────────────────────────────────
-client.on('messageCreate', async (message) => {
-    // Ignore bots and non-command messages
-    if (message.author.bot) return;
-    if (!message.content.startsWith('!')) return;
-
-    // Check if server is whitelisted
-    if (!getAllowedGuilds().includes(message.guildId)) {
-        return message.reply('❌ This server is not whitelisted.');
-    }
-
-    const args = message.content.slice(1).trim().split(/ +/);
-    const command = args.shift().toLowerCase();
-
-    // ── !track command ──────────────────────────────────────────────────
-    if (command === 'track') {
-        const firstArg = args[0] || '';
-        let targetUniverseId = null;
-        let originalPlaceId = null;
-
-        // Try to detect if it's a place ID or universe ID
-        if (firstArg.match(/^\d+$/)) {
-            if (firstArg.length > 10) {
-                originalPlaceId = firstArg;
-                const embed = new EmbedBuilder()
-                    .setColor(0xf59e0b)
-                    .setTitle('⏳ Resolving Place ID...')
-                    .setDescription(`Resolving place ID \`${firstArg}\` to universe...`);
-                await message.reply({ embeds: [embed] });
-
-                targetUniverseId = await getUniverseFromPlace(firstArg);
-                if (!targetUniverseId) {
-                    return message.reply(`❌ Could not find a universe for place ID \`${firstArg}\`.`);
-                }
-            } else {
-                targetUniverseId = firstArg;
-            }
-        } else {
-            return message.reply('❌ Please provide a valid Universe ID or Place ID.\nExample: `!track 6215464786` or `!track 78039890222332`');
-        }
-
-        // Check if already watched
-        const watched = loadWatched();
-        if (watched.some(w => w.universeId === targetUniverseId)) {
-            return message.reply(`ℹ️ Universe \`${targetUniverseId}\` is already being monitored.`);
-        }
-
-        // Fetch game info
-        const gameInfo = await getGameInfo(targetUniverseId);
-        if (!gameInfo) {
-            return message.reply(`❌ Universe ID \`${targetUniverseId}\` does not exist.`);
-        }
-
-        // Check for existing pending request
-        const requests = loadRequests();
-        const existingRequest = requests.find(r => r.universeId === targetUniverseId && r.status === 'pending');
-        if (existingRequest) {
-            return message.reply(`⚠️ A request for **${gameInfo.name}** is already pending.`);
-        }
-
-        // Create request
-        const newRequest = {
-            id: Date.now().toString(),
-            universeId: targetUniverseId,
-            placeId: originalPlaceId,
-            name: gameInfo.name,
-            requestedBy: message.author.id,
-            requestedAt: new Date().toISOString(),
-            status: 'pending'
-        };
-        requests.push(newRequest);
-        saveRequests(requests);
-
-        const embed = new EmbedBuilder()
-            .setTitle('📨 Game Request Submitted')
-            .setDescription(`**${gameInfo.name}** has been submitted for review.`)
-            .setColor(0x06b6d4)
-            .addFields(
-                { name: 'Universe ID', value: `\`${targetUniverseId}\``, inline: true },
-                { name: 'Request ID', value: `\`${newRequest.id}\``, inline: true },
-                { name: 'Requested by', value: `<@${message.author.id}>`, inline: true }
-            );
-        if (originalPlaceId) embed.addFields({ name: 'Original Place ID', value: `\`${originalPlaceId}\``, inline: true });
-        
-        await message.reply({ embeds: [embed] });
-
-        // Notify owners
-        for (const ownerId of BOT_ADMINS) {
-            const owner = await client.users.fetch(ownerId).catch(() => null);
-            if (owner) {
-                owner.send({ 
-                    embeds: [new EmbedBuilder()
-                        .setColor(0xf59e0b)
-                        .setTitle('📨 New Game Request (!track)')
-                        .setDescription(`**${gameInfo.name}**\nUniverse: \`${targetUniverseId}\`\nRequested by: <@${message.author.id}>\nUse \`/manage_requests browse\` to review.`)
-                    ] 
-                }).catch(() => {});
-            }
-        }
-        return;
-    }
-
-    // ── !help command ─────────────────────────────────────────────────────
-    if (command === 'help') {
-        const embed = new EmbedBuilder()
-            .setTitle('🔐 Qarmander Commands')
-            .setDescription(
-                `**🎮 Roblox:** /robloxgame, /robloxuser, /subplaces, /brute_link\n` +
-                `**📨 Track:** !track <universe_id> or !track <place_id>\n` +
-                `**📺 Admin:** /whitelist_game, /manage_requests\n` +
-                `**🔄 Basic:** /rot13, /rot47, /atbash, /reverse, /xor\n` +
-                `**💻 Encoding:** /base64, /bin, /hex, /octal, /ascii\n` +
-                `**🔒 Hashing:** /md5, /sha1, /sha256, /sha512\n` +
-                `**🔑 Ciphers:** /caesar, /vigenere, /beaufort, /affine\n` +
-                `**🚂 Transposition:** /railfence, /scytale, /columnar\n` +
-                `**📡 Classic:** /morse, /polybius, /baconian, /nato, /braille\n` +
-                `**🌐 Web:** /urlencode, /urldecode, /htmlencode, /htmldecode\n` +
-                `**🎛️ Other:** /menu, /botstats`
-            )
-            .setColor(0x7c3aed);
-        return message.reply({ embeds: [embed] });
-    }
-
-    // ── !listgames command ────────────────────────────────────────────────
-    if (command === 'listgames' || command === 'list') {
-        const watched = loadWatched();
-        if (!watched.length) {
-            return message.reply('📭 No games are currently being tracked.');
-        }
-        const embed = new EmbedBuilder()
-            .setTitle(`📺 Watched Games (${watched.length})`)
-            .setDescription(watched.map((w, i) => 
-                `**${i+1}.** ${w.name || w.universeId}\n` +
-                `Universe: \`${w.universeId}\`\n` +
-                `Subplaces: ${w.subplaces?.length || 0}`
-            ).join('\n\n').slice(0, 4000))
-            .setColor(0x06b6d4);
-        return message.reply({ embeds: [embed] });
-    }
-
-    // ── !status command ───────────────────────────────────────────────────
-    if (command === 'status') {
-        const uptimeSeconds = Math.floor(process.uptime());
-        const days = Math.floor(uptimeSeconds / 86400);
-        const hours = Math.floor((uptimeSeconds % 86400) / 3600);
-        const minutes = Math.floor((uptimeSeconds % 3600) / 60);
-        const seconds = uptimeSeconds % 60;
-        let uptimeStr = '';
-        if (days > 0) uptimeStr += `${days}d `;
-        if (hours > 0 || days > 0) uptimeStr += `${hours}h `;
-        if (minutes > 0 || hours > 0 || days > 0) uptimeStr += `${minutes}m `;
-        uptimeStr += `${seconds}s`;
-
-        const watched = loadWatched();
-        const requests = loadRequests();
-        const pending = requests.filter(r => r.status === 'pending');
-
-        const embed = new EmbedBuilder()
-            .setTitle('🤖 Qarmander Status')
-            .addFields(
-                { name: 'Uptime', value: uptimeStr, inline: true },
-                { name: 'Watched Games', value: `${watched.length}`, inline: true },
-                { name: 'Pending Requests', value: `${pending.length}`, inline: true },
-                { name: 'Whitelisted Servers', value: `${getAllowedGuilds().length}`, inline: true },
-                { name: 'Total Starts', value: `${botStats.startCount}`, inline: true }
-            )
-            .setColor(0x7c3aed)
-            .setFooter({ text: `Bot started ${new Date(startTime).toLocaleString()}` });
-        return message.reply({ embeds: [embed] });
-    }
-});
-
-// ── Interaction Handler ──────────────────────────────────────────────────────
+// ============================================
+// INTERACTION HANDLER
+// ============================================
 client.on('interactionCreate', async i => {
     if (!i.isCommand()) return;
     if (!getAllowedGuilds().includes(i.guildId)) {
@@ -653,575 +457,515 @@ client.on('interactionCreate', async i => {
     try {
         await i.deferReply();
     } catch (err) {
-        console.error(`Defer error for /${i.commandName}:`, err);
         if (!i.replied && !i.deferred) {
-            return i.reply({ content: '❌ Command timed out. Please try again.', ephemeral: true });
+            return i.reply({ content: '❌ Command timed out.', ephemeral: true });
         }
         return;
     }
 
     const e = new EmbedBuilder().setColor(0x7c3aed);
 
-    try {
-        switch (i.commandName) {
-            // ====================== TRACK ======================
-            case 'track': {
-                const universeIdInput = i.options.getString('universe_id');
-                const placeIdInput = i.options.getString('place_id');
+    switch (i.commandName) {
+        case 'help':
+            e.setTitle('🔐 Qarmander Commands').setDescription(`**Total Commands: ${commands.length}**\n\n🤖 **AI:** /ask\n🎮 **Roblox Search:** /gamesearch, /robloxuserinfo, /robloxuserid, /groupinfo, /assetinfo\n🎮 **Roblox:** /robloxgame, /robloxuser, /subplaces, /brute_link\n📺 **Watcher:** /whitelist_game, /request_game, /manage_requests\n🔐 **Admin:** /whitelist_server\n🔄 **Basic:** /rot13, /rot47, /atbash, /reverse, /xor\n💻 **Encoding:** /base64, /bin, /hex, /octal, /ascii, /morse\n🔒 **Hashing:** /md5, /sha1, /sha256, /sha512\n🔑 **Ciphers:** /caesar, /vigenere, /beaufort, /affine\n🚂 **Transposition:** /railfence, /scytale, /columnar, /polybius\n📡 **Classic:** /baconian, /nato, /braille, /t9, /phone, /tapcode\n🌐 **Web:** /urlencode, /urldecode, /htmlencode, /htmldecode\n🦈 **Fun:** /sogme\n🎛️ **Other:** /menu, /botstats`);
+            break;
 
-                if (!universeIdInput && !placeIdInput) {
-                    await i.editReply({ 
-                        embeds: [e.setTitle('❌ Missing ID')
-                            .setDescription('You must provide either a `universe_id` or a `place_id`.')] 
-                    });
+        case 'ping':
+            e.setTitle('🏓 Pong!').setDescription(`Latency: ${Date.now() - i.createdTimestamp}ms`);
+            break;
+
+        // ----- /gamesearch (fixed) -----
+        case 'gamesearch': {
+            const query = i.options.getString('query');
+            await i.editReply(`🔍 Searching Roblox for "${query}"...`);
+            try {
+                const res = await fetch(`https://games.roblox.com/v1/games/search?keyword=${encodeURIComponent(query)}&limit=10`);
+                if (!res.ok) throw new Error('Search API failed');
+                const data = await res.json();
+                const games = data.searchResults || [];
+                if (!games.length) {
+                    await i.editReply(`❌ No games found for "${query}"`);
                     break;
                 }
-
-                let targetUniverseId = universeIdInput;
-                let originalPlaceId = null;
-
-                if (placeIdInput) {
-                    originalPlaceId = placeIdInput;
-                    e.setDescription(`Resolving place ID ${placeIdInput} to universe...`);
-                    await i.editReply({ embeds: [e] });
-                    targetUniverseId = await getUniverseFromPlace(placeIdInput);
-                    if (!targetUniverseId) {
-                        await i.editReply({ 
-                            embeds: [e.setTitle('❌ Invalid Place')
-                                .setDescription(`Could not find a universe for place ID \`${placeIdInput}\`.`)] 
-                        });
-                        break;
-                    }
+                let result = `**🎮 Results for "${query}":**\n\n`;
+                for (let idx = 0; idx < Math.min(games.length, 10); idx++) {
+                    const game = games[idx];
+                    const gameName = game.name || 'Unknown';
+                    const creatorName = game.creator?.name || 'Unknown';
+                    const placeId = game.rootPlaceId || 'N/A';
+                    const playing = game.playing?.toLocaleString() || '0';
+                    result += `${idx+1}. **${gameName}**\n   👤 ${creatorName} | 🆔 \`${placeId}\` | 👥 ${playing} playing\n\n`;
                 }
-
-                // Check if already watched
-                const watched = loadWatched();
-                if (watched.some(w => w.universeId === targetUniverseId)) {
-                    await i.editReply({ 
-                        embeds: [e.setTitle('ℹ️ Already Watched')
-                            .setDescription(`Universe \`${targetUniverseId}\` is already being monitored.`)] 
-                    });
-                    break;
-                }
-
-                // Fetch game info
-                const gameInfo = await getGameInfo(targetUniverseId);
-                if (!gameInfo) {
-                    await i.editReply({ 
-                        embeds: [e.setTitle('❌ Game Not Found')
-                            .setDescription(`Universe ID \`${targetUniverseId}\` does not exist.`)] 
-                    });
-                    break;
-                }
-
-                // Check for existing pending request
-                const requests = loadRequests();
-                const existingRequest = requests.find(r => r.universeId === targetUniverseId && r.status === 'pending');
-                if (existingRequest) {
-                    await i.editReply({ 
-                        embeds: [e.setTitle('⚠️ Already Requested')
-                            .setDescription(`A request for **${gameInfo.name}** is already pending.`)] 
-                    });
-                    break;
-                }
-
-                // Create request
-                const newRequest = {
-                    id: Date.now().toString(),
-                    universeId: targetUniverseId,
-                    placeId: originalPlaceId,
-                    name: gameInfo.name,
-                    requestedBy: i.user.id,
-                    requestedAt: new Date().toISOString(),
-                    status: 'pending'
-                };
-                requests.push(newRequest);
-                saveRequests(requests);
-
-                e.setTitle('📨 Game Request Submitted')
-                    .setDescription(`**${gameInfo.name}** has been submitted for review.`)
-                    .setColor(0x06b6d4)
-                    .addFields(
-                        { name: 'Universe ID', value: `\`${targetUniverseId}\``, inline: true },
-                        { name: 'Request ID', value: `\`${newRequest.id}\``, inline: true },
-                        { name: 'Requested by', value: `<@${i.user.id}>`, inline: true }
-                    );
-                if (originalPlaceId) e.addFields({ name: 'Original Place ID', value: `\`${originalPlaceId}\``, inline: true });
-                await i.editReply({ embeds: [e] });
-
-                // Notify owners
-                for (const ownerId of BOT_ADMINS) {
-                    const owner = await client.users.fetch(ownerId).catch(() => null);
-                    if (owner) {
-                        owner.send({ 
-                            embeds: [new EmbedBuilder()
-                                .setColor(0xf59e0b)
-                                .setTitle('📨 New Game Request (/track)')
-                                .setDescription(`**${gameInfo.name}**\nUniverse: \`${targetUniverseId}\`\nRequested by: <@${i.user.id}>\nUse \`/manage_requests browse\` to review.`)
-                            ] 
-                        }).catch(() => {});
-                    }
-                }
-                break;
+                await i.editReply(result);
+            } catch (err) {
+                console.error(err);
+                await i.editReply('❌ Search failed. Try using `/robloxgame` with a known Universe ID instead.');
             }
-
-            // ====================== REQUEST_GAME ======================
-            case 'request_game': {
-                const universeIdInput = i.options.getString('universe_id');
-                const placeIdInput = i.options.getString('place_id');
-
-                if (!universeIdInput && !placeIdInput) {
-                    await i.editReply({ embeds: [e.setTitle('❌ Missing ID').setDescription('You must provide either a `universe_id` or a `place_id`.')] });
-                    break;
-                }
-
-                let targetUniverseId = universeIdInput;
-                let originalPlaceId = null;
-
-                if (placeIdInput) {
-                    originalPlaceId = placeIdInput;
-                    e.setDescription(`Resolving place ID ${placeIdInput} to universe...`);
-                    await i.editReply({ embeds: [e] });
-                    targetUniverseId = await getUniverseFromPlace(placeIdInput);
-                    if (!targetUniverseId) {
-                        await i.editReply({ embeds: [e.setTitle('❌ Invalid Place').setDescription(`Could not find a universe for place ID \`${placeIdInput}\`.`)] });
-                        break;
-                    }
-                }
-
-                // Check if already watched
-                const watched = loadWatched();
-                if (watched.some(w => w.universeId === targetUniverseId)) {
-                    await i.editReply({ embeds: [e.setTitle('ℹ️ Already Watched').setDescription(`Universe \`${targetUniverseId}\` is already being monitored.`)] });
-                    break;
-                }
-
-                // Fetch game info
-                const gameInfo = await getGameInfo(targetUniverseId);
-                if (!gameInfo) {
-                    await i.editReply({ embeds: [e.setTitle('❌ Game Not Found').setDescription(`Universe ID \`${targetUniverseId}\` does not exist.`) ] });
-                    break;
-                }
-
-                // Create request
-                const requests = loadRequests();
-                const existingRequest = requests.find(r => r.universeId === targetUniverseId && r.status === 'pending');
-                if (existingRequest) {
-                    await i.editReply({ embeds: [e.setTitle('⚠️ Already Requested').setDescription(`A request for **${gameInfo.name}** is already pending.`) ] });
-                    break;
-                }
-
-                const newRequest = {
-                    id: Date.now().toString(),
-                    universeId: targetUniverseId,
-                    placeId: originalPlaceId,
-                    name: gameInfo.name,
-                    requestedBy: i.user.id,
-                    requestedAt: new Date().toISOString(),
-                    status: 'pending'
-                };
-                requests.push(newRequest);
-                saveRequests(requests);
-
-                e.setTitle('📨 Game Request Submitted')
-                    .setDescription(`**${gameInfo.name}** has been submitted for review.`)
-                    .setColor(0x06b6d4)
-                    .addFields(
-                        { name: 'Universe ID', value: `\`${targetUniverseId}\``, inline: true },
-                        { name: 'Request ID', value: `\`${newRequest.id}\``, inline: true },
-                        { name: 'Requested by', value: `<@${i.user.id}>`, inline: true }
-                    );
-                if (originalPlaceId) e.addFields({ name: 'Original Place ID', value: `\`${originalPlaceId}\``, inline: true });
-                await i.editReply({ embeds: [e] });
-
-                // Notify owners
-                for (const ownerId of BOT_ADMINS) {
-                    const owner = await client.users.fetch(ownerId).catch(() => null);
-                    if (owner) {
-                        owner.send({ embeds: [new EmbedBuilder().setColor(0xf59e0b).setTitle('📨 New Game Request').setDescription(`**${gameInfo.name}**\nUniverse: \`${targetUniverseId}\`\nRequested by: <@${i.user.id}>\nUse \`/manage_requests browse\` to review.`)] }).catch(() => {});
-                    }
-                }
-                break;
-            }
-
-            // ====================== MANAGE_REQUESTS ======================
-            case 'manage_requests': {
-                if (!BOT_ADMINS.includes(i.user.id)) {
-                    await i.editReply({ embeds: [e.setTitle('❌ Access Denied').setDescription('Only bot owners can manage requests.')] });
-                    break;
-                }
-                const action = i.options.getString('action');
-                const requests = loadRequests();
-                const pending = requests.filter(r => r.status === 'pending');
-
-                if (action === 'list') {
-                    if (!pending.length) e.setTitle('📋 Game Requests').setDescription('No pending requests.').setColor(0x06b6d4);
-                    else e.setTitle(`📋 Pending Requests (${pending.length})`).setDescription(pending.map(r => `**ID:** \`${r.id}\` | **${r.name}** (Universe: \`${r.universeId}\`)\nRequested by: <@${r.requestedBy}> at ${new Date(r.requestedAt).toLocaleString()}`).join('\n\n')).setColor(0x06b6d4);
-                    await i.editReply({ embeds: [e] });
-                    break;
-                }
-
-                if (action === 'browse') {
-                    if (!pending.length) {
-                        await i.editReply({ embeds: [e.setTitle('📋 No Requests').setDescription('There are no pending game requests.')] });
-                        break;
-                    }
-                    let currentIndex = 0;
-                    const generateBrowseEmbed = (idx) => {
-                        const req = pending[idx];
-                        const embed = new EmbedBuilder().setTitle(`📨 Game Request ${idx+1}/${pending.length}`).setDescription(`**Game:** ${req.name}\n**Universe ID:** \`${req.universeId}\`\n**Request ID:** \`${req.id}\`\n**Requested by:** <@${req.requestedBy}>\n**Requested at:** ${new Date(req.requestedAt).toLocaleString()}`).setColor(0x06b6d4);
-                        if (req.placeId) embed.addFields({ name: 'Original Place ID', value: `\`${req.placeId}\``, inline: true });
-                        return embed;
-                    };
-                    const row = new ActionRowBuilder().addComponents(
-                        new ButtonBuilder().setCustomId('prev_req').setLabel('◀ Previous').setStyle(ButtonStyle.Secondary).setDisabled(pending.length === 1),
-                        new ButtonBuilder().setCustomId('next_req').setLabel('Next ▶').setStyle(ButtonStyle.Secondary).setDisabled(pending.length === 1),
-                        new ButtonBuilder().setCustomId('approve_req').setLabel('✅ Approve').setStyle(ButtonStyle.Success),
-                        new ButtonBuilder().setCustomId('reject_req').setLabel('❌ Reject').setStyle(ButtonStyle.Danger)
-                    );
-                    await i.editReply({ embeds: [generateBrowseEmbed(0)], components: [row] });
-
-                    const collector = i.channel.createMessageComponentCollector({ filter: btn => btn.user.id === i.user.id, time: 120000 });
-                    collector.on('collect', async btn => {
-                        if (btn.customId === 'prev_req') {
-                            currentIndex = (currentIndex - 1 + pending.length) % pending.length;
-                            await btn.update({ embeds: [generateBrowseEmbed(currentIndex)], components: [row] });
-                        } else if (btn.customId === 'next_req') {
-                            currentIndex = (currentIndex + 1) % pending.length;
-                            await btn.update({ embeds: [generateBrowseEmbed(currentIndex)], components: [row] });
-                        } else if (btn.customId === 'approve_req') {
-                            const req = pending[currentIndex];
-                            const watched = loadWatched();
-                            if (!watched.some(w => w.universeId === req.universeId)) {
-                                const game = await getGameInfo(req.universeId);
-                                if (game) {
-                                    const subplaces = await getSubplaces(req.universeId);
-                                    const newEntry = {
-                                        universeId: req.universeId, name: game.name, channelId: i.channelId, guildId: i.guildId,
-                                        lastUpdated: game.updated, addedBy: i.user.id, addedAt: new Date().toISOString(),
-                                        subplaces: subplaces.map(sp => ({ placeId: sp.placeId, name: sp.name, lastUpdated: sp.updated }))
-                                    };
-                                    watched.push(newEntry);
-                                    saveWatched(watched);
-                                }
-                            }
-                            req.status = 'approved';
-                            saveRequests(requests);
-                            await btn.update({ embeds: [new EmbedBuilder().setColor(0x10b981).setTitle('✅ Request Approved').setDescription(`**${req.name}** has been added to the watch list.`)], components: [] });
-                            collector.stop();
-                            return;
-                        } else if (btn.customId === 'reject_req') {
-                            const req = pending[currentIndex];
-                            req.status = 'rejected';
-                            saveRequests(requests);
-                            await btn.update({ embeds: [new EmbedBuilder().setColor(0xef4444).setTitle('❌ Request Rejected').setDescription(`**${req.name}** has been rejected.`)], components: [] });
-                            collector.stop();
-                            return;
-                        }
-                    });
-                    collector.on('end', () => { i.editReply({ components: [] }).catch(() => {}); });
-                    break;
-                }
-
-                if (action === 'approve') {
-                    const reqId = i.options.getString('request_id');
-                    const request = requests.find(r => r.id === reqId);
-                    if (!request || request.status !== 'pending') {
-                        await i.editReply({ embeds: [e.setTitle('❌ Not Found').setDescription(`No pending request with ID \`${reqId}\`.`)] });
-                        break;
-                    }
-                    const watched = loadWatched();
-                    if (!watched.some(w => w.universeId === request.universeId)) {
-                        const game = await getGameInfo(request.universeId);
-                        if (game) {
-                            const subplaces = await getSubplaces(request.universeId);
-                            const newEntry = {
-                                universeId: request.universeId, name: game.name, channelId: i.channelId, guildId: i.guildId,
-                                lastUpdated: game.updated, addedBy: i.user.id, addedAt: new Date().toISOString(),
-                                subplaces: subplaces.map(sp => ({ placeId: sp.placeId, name: sp.name, lastUpdated: sp.updated }))
-                            };
-                            watched.push(newEntry);
-                            saveWatched(watched);
-                        }
-                    }
-                    request.status = 'approved';
-                    saveRequests(requests);
-                    e.setTitle('✅ Request Approved').setDescription(`**${request.name}** has been added to the watch list.`).setColor(0x10b981);
-                    await i.editReply({ embeds: [e] });
-                    const requester = await client.users.fetch(request.requestedBy).catch(() => null);
-                    if (requester) requester.send({ embeds: [new EmbedBuilder().setColor(0x10b981).setTitle('✅ Your game request was approved!').setDescription(`**${request.name}** is now being monitored.`)] }).catch(() => {});
-                    break;
-                }
-
-                if (action === 'reject') {
-                    const reqId = i.options.getString('request_id');
-                    const request = requests.find(r => r.id === reqId);
-                    if (!request || request.status !== 'pending') {
-                        await i.editReply({ embeds: [e.setTitle('❌ Not Found').setDescription(`No pending request with ID \`${reqId}\`.`)] });
-                        break;
-                    }
-                    request.status = 'rejected';
-                    saveRequests(requests);
-                    e.setTitle('❌ Request Rejected').setDescription(`**${request.name}** has been rejected.`).setColor(0xef4444);
-                    await i.editReply({ embeds: [e] });
-                    const requester = await client.users.fetch(request.requestedBy).catch(() => null);
-                    if (requester) requester.send({ embeds: [new EmbedBuilder().setColor(0xef4444).setTitle('❌ Your game request was rejected').setDescription(`**${request.name}** was not approved.`)] }).catch(() => {});
-                    break;
-                }
-                break;
-            }
-
-            // ====================== HELP ======================
-            case 'help':
-                e.setTitle('🔐 Qarmander Commands').setDescription(
-                    `**Total Commands: ${commands.length}**\n\n` +
-                    `🎮 **Roblox:** /brute_link, /robloxgame, /robloxuser, /subplaces\n` +
-                    `📺 **Watcher:** /whitelist_game (admin only)\n` +
-                    `📨 **Requests:** /request_game (everyone) | /manage_requests (owners)\n` +
-                    `🔐 **Admin:** /whitelist_server\n` +
-                    `🔄 **Basic:** /rot13, /rot47, /atbash, /reverse, /xor\n` +
-                    `💻 **Encoding:** /base64, /bin, /hex, /octal, /ascii, /morse\n` +
-                    `🔒 **Hashing:** /md5, /sha1, /sha256, /sha512\n` +
-                    `🔑 **Ciphers:** /caesar, /vigenere, /beaufort, /affine, /gronsfeld, /autokey\n` +
-                    `🚂 **Transposition:** /railfence, /scytale, /columnar, /polybius\n` +
-                    `📡 **Classic:** /baconian, /nato, /braille, /t9, /phone, /tapcode\n` +
-                    `🌐 **Web:** /urlencode, /urldecode, /htmlencode, /htmldecode\n` +
-                    `🎛️ **Other:** /menu, /botstats`
-                );
-                break;
-
-            // ====================== WHITELIST_SERVER ======================
-            case 'whitelist_server':
-                if (!BOT_ADMINS.includes(i.user.id)) {
-                    await i.editReply({ embeds: [e.setTitle('❌ Access Denied').setDescription('Only spanishrobey & gasheper can use this.')] });
-                    break;
-                }
-                const actionWS = i.options.getString('action');
-                const guildId = i.options.getString('guild_id').trim();
-                if (actionWS === 'remove' && HARDCODED_GUILDS.includes(guildId)) {
-                    await i.editReply({ embeds: [e.setTitle('⚠️ Protected').setDescription('Cannot remove hardcoded guild.')] });
-                    break;
-                }
-                const dynamic = loadGuilds();
-                if (actionWS === 'add') {
-                    if (dynamic.includes(guildId) || HARDCODED_GUILDS.includes(guildId)) {
-                        await i.editReply({ embeds: [e.setTitle('ℹ️ Already whitelisted')] });
-                    } else {
-                        dynamic.push(guildId);
-                        saveGuilds(dynamic);
-                        e.setTitle('✅ Server Whitelisted').setDescription(`Added \`${guildId}\``).setColor(0x10b981).addFields({ name:'Added by', value:`<@${i.user.id}>`, inline:true });
-                        await i.editReply({ embeds: [e] });
-                    }
-                } else {
-                    const idx = dynamic.indexOf(guildId);
-                    if (idx === -1) {
-                        await i.editReply({ embeds: [e.setTitle('❌ Not found')] });
-                    } else {
-                        dynamic.splice(idx,1);
-                        saveGuilds(dynamic);
-                        e.setTitle('🗑️ Removed').setDescription(`Removed \`${guildId}\``).setColor(0xef4444);
-                        await i.editReply({ embeds: [e] });
-                    }
-                }
-                break;
-
-            // ====================== WHITELIST_GAME ======================
-            case 'whitelist_game':
-                if (!BOT_ADMINS.includes(i.user.id)) {
-                    await i.editReply({ embeds: [e.setTitle('❌ Access Denied').setDescription('Only spanishrobey & gasheper can manage games.')] });
-                    break;
-                }
-                const actWG = i.options.getString('action');
-                const watched = loadWatched();
-                if (actWG === 'list') {
-                    if (!watched.length) e.setTitle('📺 Watched Games').setDescription('No games being watched.');
-                    else e.setTitle('📺 Watched Games').setDescription(watched.map((w,i)=>`**${i+1}. ${w.name||w.universeId}**\nUniverse: \`${w.universeId}\`\nChannel: <#${w.channelId}>\nSubplaces: ${w.subplaces?.length??0}\nAdded by: <@${w.addedBy}>`).join('\n\n')).setColor(0x06b6d4);
-                    await i.editReply({ embeds: [e] });
-                    break;
-                }
-                const universeIdWG = i.options.getString('universe_id')?.trim();
-                if (!universeIdWG) {
-                    await i.editReply({ embeds: [e.setTitle('❌ Missing universe_id')] });
-                    break;
-                }
-                if (actWG === 'change_channel') {
-                    const newChan = i.options.getString('channel')?.trim();
-                    if (!newChan) { await i.editReply({ embeds: [e.setTitle('❌ Missing channel')] }); break; }
-                    const entry = watched.find(w => w.universeId === universeIdWG);
-                    if (!entry) { await i.editReply({ embeds: [e.setTitle('❌ Not watched')] }); break; }
-                    const old = entry.channelId;
-                    entry.channelId = newChan;
-                    saveWatched(watched);
-                    e.setTitle('🔄 Channel Updated').setDescription(`**${entry.name||universeIdWG}** now alerts in <#${newChan}>`).addFields({ name:'Old', value:`<#${old}>`, inline:true }, { name:'New', value:`<#${newChan}>`, inline:true });
-                    await i.editReply({ embeds: [e] });
-                    break;
-                }
-                if (actWG === 'remove') {
-                    const idx = watched.findIndex(w => w.universeId === universeIdWG);
-                    if (idx === -1) { await i.editReply({ embeds: [e.setTitle('❌ Not found')] }); break; }
-                    const removed = watched.splice(idx,1)[0];
-                    saveWatched(watched);
-                    e.setTitle('🗑️ Game Unwatched').setDescription(`**${removed.name||universeIdWG}** removed.`);
-                    await i.editReply({ embeds: [e] });
-                    break;
-                }
-                if (actWG === 'add') {
-                    const channelId = i.options.getString('channel')?.trim() || i.channelId;
-                    if (watched.find(w => w.universeId === universeIdWG)) {
-                        await i.editReply({ embeds: [e.setTitle('ℹ️ Already watching')] });
-                        break;
-                    }
-                    e.setTitle('⏳ Fetching...');
-                    await i.editReply({ embeds: [e] });
-                    const game = await getGameInfo(universeIdWG);
-                    if (!game) {
-                        await i.editReply({ embeds: [e.setTitle('❌ Game not found')] });
-                        break;
-                    }
-                    const subplaces = await getSubplaces(universeIdWG);
-                    const newEntry = {
-                        universeId: universeIdWG, name: game.name, channelId, guildId: i.guildId,
-                        lastUpdated: game.updated, addedBy: i.user.id, addedAt: new Date().toISOString(),
-                        subplaces: subplaces.map(sp => ({ placeId: sp.placeId, name: sp.name, lastUpdated: sp.updated }))
-                    };
-                    watched.push(newEntry);
-                    saveWatched(watched);
-                    e.setTitle('✅ Game Added').setDescription(`Now watching **${game.name}**`).setColor(0x10b981)
-                        .setThumbnail(`https://www.roblox.com/asset-thumbnail/image?assetId=${game.rootPlaceId}&width=512&height=512&format=png`)
-                        .addFields({ name:'Universe', value:`\`${universeIdWG}\``, inline:true }, { name:'Channel', value:`<#${channelId}>`, inline:true }, { name:'Subplaces', value:`${subplaces.length}`, inline:true });
-                    await i.editReply({ embeds: [e] });
-                }
-                break;
-
-            // ====================== SUBPLACES ======================
-            case 'subplaces':
-                const uid = i.options.getString('universe_id').trim();
-                e.setTitle('⏳ Fetching...');
-                await i.editReply({ embeds: [e] });
-                const [gameSub, subs] = await Promise.all([getGameInfo(uid), getSubplaces(uid)]);
-                if (!gameSub) { await i.editReply({ embeds: [e.setTitle('❌ Not found')] }); break; }
-                e.setTitle(`📦 Subplaces — ${gameSub.name}`).setColor(0x06b6d4).setURL(`https://www.roblox.com/games/${gameSub.rootPlaceId}`)
-                    .setThumbnail(`https://www.roblox.com/asset-thumbnail/image?assetId=${gameSub.rootPlaceId}&width=512&height=512&format=png`)
-                    .addFields({ name:'Universe ID', value:`\`${uid}\``, inline:true }, { name:'Total', value:`${subs.length}`, inline:true });
-                if (subs.length) e.setDescription(subs.map((sp,i)=>`**${i+1}.** ${sp.name}\nPlace ID: \`${sp.placeId}\`\nUpdated: ${sp.updated??'Unknown'}\n[Open](https://www.roblox.com/games/${sp.placeId})`).join('\n\n').slice(0,4000));
-                else e.setDescription('No subplaces found (may require authentication).');
-                await i.editReply({ embeds: [e] });
-                break;
-
-            // ====================== BRUTE_LINK ======================
-            case 'brute_link':
-                const id = i.options.getString('id');
-                e.setTitle(`🔍 Scanning ID: ${id}`).setDescription('Checking endpoints...');
-                await i.editReply({ embeds: [e] });
-                const results = await bruteForceRoblox(id);
-                const good = Object.entries(results).filter(([,v])=>v.success);
-                e.setTitle(`🔗 Bruteforce — ${id}`).setColor(good.length ? 0x10b981 : 0xef4444)
-                    .setDescription(`✅ ${good.length} endpoints found\n${good.slice(0,10).map(([n,d])=>`**${n}**: ${d.data?.name || d.data?.data?.[0]?.name || 'Found'}`).join('\n')}`);
-                if (good.length) e.addFields({ name:'❌ Failed', value:Object.entries(results).filter(([,v])=>!v.success).map(([n,d])=>`• ${n} (${d.status || d.error || 'error'})`).join('\n').slice(0,1000) });
-                break;
-
-            // ====================== ROBLOXGAME ======================
-            case 'robloxgame':
-                const g = await getGameInfo(i.options.getString('id'));
-                if (g) e.setTitle(`🎮 ${g.name}`).setURL(`https://www.roblox.com/games/${g.rootPlaceId}`).setThumbnail(`https://www.roblox.com/asset-thumbnail/image?assetId=${g.rootPlaceId}&width=512&height=512&format=png`).addFields({name:'Playing', value:`${g.playing?.toLocaleString()??'N/A'}`, inline:true},{name:'Visits', value:`${g.visits?.toLocaleString()??'N/A'}`, inline:true},{name:'Creator', value:g.creator?.name??'Unknown', inline:true},{name:'Universe ID', value:`\`${g.id}\``, inline:true},{name:'Place ID', value:`\`${g.rootPlaceId}\``, inline:true},{name:'Updated', value:g.updated??'Unknown', inline:true});
-                else e.setTitle('❌ Not found');
-                break;
-
-            // ====================== ROBLOXUSER ======================
-            case 'robloxuser':
-                const u = await getRobloxUser(i.options.getString('username'));
-                if (u) e.setTitle(`👤 ${u.name}`).setDescription(`ID: ${u.id}\nDisplay: ${u.displayName}`);
-                else e.setTitle('❌ Not found');
-                break;
-
-            // ====================== CIPHER CASES ======================
-            case 'rot13': e.setTitle('ROT13').setDescription(`\`${snip(rot13(i.options.getString('text')))}\``); break;
-            case 'rot47': e.setTitle('ROT47').setDescription(`\`${snip(rot47(i.options.getString('text')))}\``); break;
-            case 'atbash': e.setTitle('Atbash').setDescription(`\`${snip(atbash(i.options.getString('text')))}\``); break;
-            case 'base64': e.setTitle('Base64').setDescription(`\`${snip(base64e(i.options.getString('text')))}\``); break;
-            case 'base64d': e.setTitle('Base64 Decode').setDescription(`\`${snip(base64d(i.options.getString('text')))}\``); break;
-            case 'reverse': e.setTitle('Reverse').setDescription(`\`${snip(reverse(i.options.getString('text')))}\``); break;
-            case 'bin': e.setTitle('Binary').setDescription(`\`${snip(textToBin(i.options.getString('text')))}\``); break;
-            case 'bindecode': e.setTitle('Binary Decode').setDescription(`\`${snip(binToText(i.options.getString('binary')))}\``); break;
-            case 'hex': e.setTitle('Hex').setDescription(`\`${snip(textToHex(i.options.getString('text')))}\``); break;
-            case 'hexdecode': e.setTitle('Hex Decode').setDescription(`\`${snip(hexToText(i.options.getString('hex')))}\``); break;
-            case 'octal': e.setTitle('Octal').setDescription(`\`${snip(textToOctal(i.options.getString('text')))}\``); break;
-            case 'octaldecode': e.setTitle('Octal Decode').setDescription(`\`${snip(octalToText(i.options.getString('octal')))}\``); break;
-            case 'ascii': e.setTitle('ASCII').setDescription(`\`${snip(textToAscii(i.options.getString('text')))}\``); break;
-            case 'asciidecode': e.setTitle('ASCII Decode').setDescription(`\`${snip(asciiToText(i.options.getString('codes')))}\``); break;
-            case 'md5': e.setTitle('MD5').setDescription(`\`${md5(i.options.getString('text'))}\``); break;
-            case 'sha1': e.setTitle('SHA-1').setDescription(`\`${sha1(i.options.getString('text'))}\``); break;
-            case 'sha256': e.setTitle('SHA-256').setDescription(`\`${sha256(i.options.getString('text'))}\``); break;
-            case 'sha512': e.setTitle('SHA-512').setDescription(`\`${sha512(i.options.getString('text'))}\``); break;
-            case 'morse': e.setTitle('Morse').setDescription(`\`${snip(textToMorse(i.options.getString('text')))}\``); break;
-            case 'morsedecode': e.setTitle('Morse Decode').setDescription(`\`${snip(morseToText(i.options.getString('morse')))}\``); break;
-            case 'caesar': { const s = i.options.getInteger('shift') ?? 3; e.setTitle(`Caesar (shift ${s})`).setDescription(`\`${snip(caesar(i.options.getString('text'), s))}\``); break; }
-            case 'caesarbf': e.setTitle('Caesar Brute').setDescription(`\`\`\`${snip(caesarBrute(i.options.getString('text')),1900)}\`\`\``); break;
-            case 'vigenere': e.setTitle('Vigenère Encode').setDescription(`\`${snip(vigenereEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
-            case 'vigdecode': e.setTitle('Vigenère Decode').setDescription(`\`${snip(vigenereDecode(i.options.getString('text'), i.options.getString('key')))}\``); break;
-            case 'beaufort': e.setTitle('Beaufort').setDescription(`\`${snip(beaufort(i.options.getString('text'), i.options.getString('key')))}\``); break;
-            case 'affine': e.setTitle('Affine Encode').setDescription(`\`${snip(affineEncode(i.options.getString('text'), i.options.getInteger('a'), i.options.getInteger('b')))}\``); break;
-            case 'affinedecode': e.setTitle('Affine Decode').setDescription(`\`${snip(affineDecode(i.options.getString('text'), i.options.getInteger('a'), i.options.getInteger('b')))}\``); break;
-            case 'railfence': { const r = i.options.getInteger('rails') ?? 3; e.setTitle(`Rail Fence (${r} rails)`).setDescription(`\`${snip(railFenceEncode(i.options.getString('text'), r))}\``); break; }
-            case 'railfencedecode': { const r = i.options.getInteger('rails') ?? 3; e.setTitle(`Rail Fence Decode`).setDescription(`\`${snip(railFenceDecode(i.options.getString('text'), r))}\``); break; }
-            case 'scytale': { const c = i.options.getInteger('cols') ?? 4; e.setTitle(`Scytale (${c} cols)`).setDescription(`\`${snip(scytaleEncode(i.options.getString('text'), c))}\``); break; }
-            case 'scytaledecode': { const c = i.options.getInteger('cols') ?? 4; e.setTitle(`Scytale Decode`).setDescription(`\`${snip(scytaleDecode(i.options.getString('text'), c))}\``); break; }
-            case 'columnar': e.setTitle('Columnar Encode').setDescription(`\`${snip(columnarEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
-            case 'columnardecode': e.setTitle('Columnar Decode').setDescription(`\`${snip(columnarDecode(i.options.getString('text'), i.options.getString('key')))}\``); break;
-            case 'polybius': e.setTitle('Polybius Encode').setDescription(`\`${snip(polybiusEncode(i.options.getString('text')))}\``); break;
-            case 'polybiusdecode': e.setTitle('Polybius Decode').setDescription(`\`${snip(polybiusDecode(i.options.getString('numbers')))}\``); break;
-            case 'baconian': e.setTitle('Baconian Encode').setDescription(`\`${snip(baconEncode(i.options.getString('text')))}\``); break;
-            case 'baconiandecode': e.setTitle('Baconian Decode').setDescription(`\`${snip(baconDecode(i.options.getString('bacon')))}\``); break;
-            case 'nato': e.setTitle('NATO').setDescription(`\`${snip(toNato(i.options.getString('text')))}\``); break;
-            case 'braille': e.setTitle('Braille').setDescription(`\`${snip(textToBraille(i.options.getString('text')))}\``); break;
-            case 't9': e.setTitle('T9').setDescription(`\`${snip(textToT9(i.options.getString('text')))}\``); break;
-            case 'phone': e.setTitle('Phone Digits').setDescription(`\`${snip(textToPhone(i.options.getString('text')))}\``); break;
-            case 'tapcode': e.setTitle('Tap Code Encode').setDescription(`\`${snip(tapCodeEncode(i.options.getString('text')))}\``); break;
-            case 'tapcodedecode': e.setTitle('Tap Code Decode').setDescription(`\`${snip(tapCodeDecode(i.options.getString('code')))}\``); break;
-            case 'urlencode': e.setTitle('URL Encode').setDescription(`\`${snip(urlEncode(i.options.getString('text')))}\``); break;
-            case 'urldecode': e.setTitle('URL Decode').setDescription(`\`${snip(urlDecode(i.options.getString('text')))}\``); break;
-            case 'htmlencode': e.setTitle('HTML Encode').setDescription(`\`${snip(htmlEncode(i.options.getString('text')))}\``); break;
-            case 'htmldecode': e.setTitle('HTML Decode').setDescription(`\`${snip(htmlDecode(i.options.getString('text')))}\``); break;
-            case 'xor': e.setTitle('XOR').setDescription(`\`${snip(xorCipher(i.options.getString('text'), i.options.getString('key')))}\``); break;
-            case 'gronsfeld': e.setTitle('Gronsfeld Encode').setDescription(`\`${snip(gronsfeldEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
-            case 'gronsfelddecode': e.setTitle('Gronsfeld Decode').setDescription(`\`${snip(gronsfeldDecode(i.options.getString('text'), i.options.getString('key')))}\``); break;
-            case 'autokey': e.setTitle('Autokey Encode').setDescription(`\`${snip(autokeyEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
-
-            // ====================== BOTSTATS ======================
-            case 'botstats':
-                const up = Math.floor((Date.now() - startTime) / 1000);
-                const d = Math.floor(up / 86400), h = Math.floor((up % 86400) / 3600), m = Math.floor((up % 3600) / 60), s = up % 60;
-                e.setTitle('🤖 Bot Stats').addFields({ name:'Starts', value:`${botStats.startCount}`, inline:true }, { name:'Uptime', value:`${d}d ${h}h ${m}m ${s}s`, inline:true }, { name:'Commands', value:`${commands.length}`, inline:true }, { name:'Watched', value:`${loadWatched().length}`, inline:true }, { name:'Whitelisted', value:`${getAllowedGuilds().length} servers`, inline:true });
-                break;
-
-            // ====================== MENU ======================
-            case 'menu': {
-                const row = new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('menu').setPlaceholder('Select cipher').addOptions([{ label:'ROT13', value:'rot13' }, { label:'Atbash', value:'atbash' }, { label:'Base64', value:'base64' }, { label:'Reverse', value:'reverse' }, { label:'Morse', value:'morse' }]));
-                await i.editReply({ embeds: [e.setTitle('🎛 Interactive Menu')], components: [row] });
-                const filter = m => m.user.id === i.user.id;
-                const collector = i.channel.createMessageComponentCollector({ filter, time: 60000, max: 1 });
-                collector.on('collect', async menu => {
-                    await menu.reply({ content: 'Type your message:', ephemeral: true });
-                    const msgCollector = i.channel.createMessageCollector({ filter, time: 30000, max: 1 });
-                    msgCollector.on('collect', async msg => {
-                        const fn = { rot13, atbash, base64: base64e, reverse, morse: textToMorse }[menu.values[0]];
-                        const res = fn ? fn(msg.content) : msg.content;
-                        await i.followUp({ embeds: [new EmbedBuilder().setColor(0x7c3aed).setTitle(menu.values[0].toUpperCase()).setDescription(`\`${snip(res)}\``)] });
-                    });
-                });
-                break;
-            }
+            break;
         }
-    } catch (err) {
-        console.error(err);
-        e.setTitle('❌ Error').setDescription('Something went wrong.');
-        if (i.deferred && !i.replied) await i.editReply({ embeds: [e] });
-        else if (!i.replied) await i.reply({ embeds: [e], ephemeral: true });
-        return;
+
+        // ----- /robloxuserinfo (fixed) -----
+        case 'robloxuserinfo': {
+            const username = i.options.getString('username');
+            await i.editReply(`🔍 Looking up ${username}...`);
+            try {
+                const res = await fetch(`https://users.roblox.com/v1/usernames/users`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ usernames: [username] })
+                });
+                const data = await res.json();
+                const user = data.data?.[0];
+                if (!user) {
+                    await i.editReply(`❌ User "${username}" not found`);
+                    break;
+                }
+                const userId = user.id;
+                const detailRes = await fetch(`https://users.roblox.com/v1/users/${userId}`);
+                const details = await detailRes.json();
+                e.setTitle(`👤 ${details.name}`)
+                 .setDescription(details.displayName ? `Also known as: ${details.displayName}` : '*No display name*')
+                 .addFields(
+                     { name: '🆔 User ID', value: `\`${details.id}\``, inline: true },
+                     { name: '📅 Join Date', value: details.created ? new Date(details.created).toLocaleDateString() : 'Unknown', inline: true },
+                     { name: '✅ Verified', value: details.isVerified ? '✅ Yes' : '❌ No', inline: true },
+                     { name: '🔗 Profile', value: `[Click here](https://www.roblox.com/users/${details.id}/profile)`, inline: false }
+                 )
+                 .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${details.id}&width=420&height=420&format=png`);
+                await i.editReply({ embeds: [e] });
+            } catch (err) {
+                console.error(err);
+                await i.editReply('❌ User not found or API error.');
+            }
+            break;
+        }
+
+        // ----- /robloxuserid (fixed) -----
+        case 'robloxuserid': {
+            const userId = i.options.getString('userid');
+            await i.editReply(`🔍 Looking up user ID ${userId}...`);
+            try {
+                const res = await fetch(`https://users.roblox.com/v1/users/${userId}`);
+                if (!res.ok) throw new Error('User not found');
+                const details = await res.json();
+                e.setTitle(`👤 ${details.name}`)
+                 .setDescription(details.displayName ? `Also known as: ${details.displayName}` : '*No display name*')
+                 .addFields(
+                     { name: '🆔 User ID', value: `\`${details.id}\``, inline: true },
+                     { name: '📅 Join Date', value: details.created ? new Date(details.created).toLocaleDateString() : 'Unknown', inline: true },
+                     { name: '✅ Verified', value: details.isVerified ? '✅ Yes' : '❌ No', inline: true },
+                     { name: '🔗 Profile', value: `[Click here](https://www.roblox.com/users/${details.id}/profile)`, inline: false }
+                 )
+                 .setThumbnail(`https://www.roblox.com/headshot-thumbnail/image?userId=${details.id}&width=420&height=420&format=png`);
+                await i.editReply({ embeds: [e] });
+            } catch (err) {
+                console.error(err);
+                await i.editReply('❌ Invalid user ID or not found.');
+            }
+            break;
+        }
+
+        // ----- /groupinfo (fixed) -----
+        case 'groupinfo': {
+            const groupId = i.options.getString('groupid');
+            await i.editReply(`🔍 Looking up group ${groupId}...`);
+            try {
+                const res = await fetch(`https://groups.roblox.com/v1/groups/${groupId}`);
+                if (!res.ok) throw new Error('Group not found');
+                const group = await res.json();
+                e.setTitle(`👥 ${group.name}`)
+                 .setDescription(group.description?.slice(0, 200) || '*No description*')
+                 .addFields(
+                     { name: '🆔 Group ID', value: `\`${group.id}\``, inline: true },
+                     { name: '👤 Members', value: group.memberCount?.toLocaleString() || 'Unknown', inline: true },
+                     { name: '👑 Owner', value: group.owner ? group.owner.username : 'Unknown', inline: true },
+                     { name: '🏷️ Public', value: group.publicEntriesAllowed ? '✅ Yes' : '❌ No', inline: true },
+                     { name: '🔗 Link', value: `[Click here](https://www.roblox.com/groups/${group.id})`, inline: false }
+                 );
+                if (group.emblemUrl) e.setThumbnail(group.emblemUrl);
+                await i.editReply({ embeds: [e] });
+            } catch (err) {
+                console.error(err);
+                await i.editReply('❌ Group not found or private.');
+            }
+            break;
+        }
+
+        // ----- /assetinfo (fixed) -----
+        case 'assetinfo': {
+            const assetId = i.options.getString('assetid');
+            await i.editReply(`🔍 Looking up asset ${assetId}...`);
+            try {
+                const res = await fetch(`https://economy.roblox.com/v2/assets/${assetId}/details`);
+                if (!res.ok) throw new Error('Asset not found');
+                const asset = await res.json();
+                e.setTitle(`📦 ${asset.Name}`)
+                 .setDescription(asset.Description?.slice(0, 200) || '*No description*')
+                 .addFields(
+                     { name: '🆔 Asset ID', value: `\`${asset.AssetId}\``, inline: true },
+                     { name: '👤 Creator', value: asset.Creator?.Name || 'Unknown', inline: true },
+                     { name: '💰 Price', value: asset.PriceInRobux ? `${asset.PriceInRobux} Robux` : 'Free', inline: true },
+                     { name: '📅 Created', value: asset.Created ? new Date(asset.Created).toLocaleDateString() : 'Unknown', inline: true },
+                     { name: '🔗 Link', value: `[Click here](https://www.roblox.com/library/${asset.AssetId})`, inline: false }
+                 );
+                if (asset.ImageUrl) e.setThumbnail(asset.ImageUrl);
+                await i.editReply({ embeds: [e] });
+            } catch (err) {
+                console.error(err);
+                await i.editReply('❌ Asset not found or private.');
+            }
+            break;
+        }
+
+        // ----- /sogme -----
+        case 'sogme': {
+            const query = i.options.getString('query')?.toLowerCase() || '';
+            await i.editReply('🌊 **Searching...**');
+
+            try {
+                const res = await fetch('https://mirror.guweh.com/images.json');
+                if (!res.ok) throw new Error('Failed to fetch images');
+                const images = await res.json();
+
+                let filteredImages = images;
+                if (query) {
+                    filteredImages = images.filter(img => img.toLowerCase().includes(query));
+                    if (!filteredImages.length) {
+                        await i.editReply(`❌ No images found for "${query}"`);
+                        break;
+                    }
+                }
+
+                const randomImage = filteredImages[Math.floor(Math.random() * filteredImages.length)];
+                const imageUrl = `https://mirror.guweh.com/${encodeURIComponent(randomImage)}`;
+
+                const embed = new EmbedBuilder()
+                    .setColor(0x00bfff)
+                    .setTitle('🦈 Soggy')
+                    .setImage(imageUrl);
+
+                await i.editReply({ embeds: [embed] });
+
+            } catch (error) {
+                console.error('Sogme error:', error);
+                await i.editReply('❌ Failed to fetch image.');
+            }
+            break;
+        }
+
+        // ----- /ask (AI) -----
+        case 'ask': {
+            const question = i.options.getString('question');
+            if (!aiModel) {
+                await i.editReply('❌ AI not configured. Add GEMINI_API_KEY to Sacred-Stuff.env');
+                break;
+            }
+            await i.editReply('🤔 **Thinking...**');
+            try {
+                const result = await aiModel.generateContent(question);
+                const answer = result.response.text();
+                if (answer.length > 1900) {
+                    await i.editReply(answer.slice(0, 1900));
+                    await i.followUp(answer.slice(1900));
+                } else {
+                    await i.editReply(answer);
+                }
+            } catch (error) {
+                await i.editReply('❌ AI error. Try again later.');
+            }
+            break;
+        }
+
+        // ----- Original Roblox commands (simplified) -----
+        case 'robloxgame': {
+            const id = i.options.getString('id');
+            const game = await getGameInfo(id);
+            if (game) {
+                e.setTitle(`🎮 ${game.name}`)
+                 .setURL(`https://www.roblox.com/games/${game.rootPlaceId}`)
+                 .addFields(
+                     { name: '👥 Playing', value: game.playing?.toLocaleString() ?? 'N/A', inline: true },
+                     { name: '🏆 Visits', value: game.visits?.toLocaleString() ?? 'N/A', inline: true },
+                     { name: '👤 Creator', value: game.creator?.name ?? 'Unknown', inline: true }
+                 );
+            } else {
+                e.setTitle('❌ Game not found');
+            }
+            break;
+        }
+        case 'robloxuser': {
+            const username = i.options.getString('username');
+            const user = await getRobloxUser(username);
+            if (user) {
+                e.setTitle(`👤 ${user.name}`).setDescription(`ID: ${user.id}\nDisplay: ${user.displayName}`);
+            } else {
+                e.setTitle('❌ User not found');
+            } else {
+                e.setTitle('❌ User not found');
+            }
+            break;
+        }
+ }
+            break;
+        }
+        case 'subplaces': {
+            const uid = i.options.getString('universe_id');
+            const subs = await getSubplaces(uid);
+                   case 'subplaces': {
+            const uid = i.options.getString('universe_id');
+            const subs = await getSubplaces(uid);
+            e.setTitle(`Subplaces for ${uid}`).setDescription(subs.length ? subs.map(p => `• ${p.name} e.setTitle(`Subplaces for ${uid}`).setDescription(subs.length ? subs.map(p => `• ${p.name} (${p.id})`).join('\n').slice(0, 4000) : 'None found');
+            break;
+        }
+        case 'brute_link': {
+            const id (${p.id})`).join('\n').slice(0, 4000) : 'None found');
+            break;
+        }
+        case 'brute_link': {
+            const id = i.options.getString('id');
+            const results = await bruteForceRoblox(id);
+            e.setTitle(` = i.options.getString('id');
+            const results = await bruteForceRoblox(id);
+            e.setTitle(`🔍 Bruteforce for ${id}`).setDescription(Object.entries(results🔍 Bruteforce for ${id}`).setDescription(Object.entries(results).map(([k,v]) => `${k).map(([k,v]) => `${k}: ${v.success ? '✅' : '❌'}`).join('\n'));
+            break;
+        }
+       }: ${v.success ? '✅' : '❌'}`).join('\n'));
+            break;
+        }
+        case 'botstats': {
+            const up = Math.floor((Date.now() - startTime) / 1000);
+            const d = Math.floor(up case 'botstats': {
+            const up = Math.floor((Date.now() - startTime) / 1000);
+            const d = Math.floor(up / / 86400), h = Math.floor((up % 86400) / 3600 86400), h = Math.floor((up % 86400) / 3600), m = Math.floor((up % 3600) / 60);
+            e.setTitle('🤖 Bot Stats').addFields(
+                { name: 'Starts', value:), m = Math.floor((up % 3600) / 60);
+            e.setTitle('🤖 Bot Stats').addFields(
+                { name: 'Starts', value: `${botStats.startCount}`, inline: true },
+                `${botStats.startCount}`, inline: true },
+                { name: 'Uptime', value: `${d}d ${h}h ${m}m`, inline: true },
+                { name: { name: 'Uptime', value: `${d}d ${h}h ${m}m`, inline: true },
+                { name 'Commands', value: `${commands.length}`, inline: true },
+                { name: 'AI', value: aiModel ? '✅: 'Commands', value: `${commands.length}`, inline: true },
+                { name: 'AI', value: aiModel ? '✅' : '❌', inline: true }
+            );
+            break;
+        }
+
+        // ----- Cipher handlers (' : '❌', inline: true }
+            );
+            break;
+        }
+
+        // ----- Cipher handlers (quick) -----
+        case 'rot13': e.setTitle('ROT13').setquick) -----
+        case 'rot13': e.setTitle('ROT13').setDescription(`\`${snip(rot13(i.options.getString('text')))}\``); breakDescription(`\`${snip(rot13(i.options.getString('text')))}\``); break;
+        case 'rot47': e.setTitle('ROT47').setDescription(`\`;
+        case 'rot47': e.setTitle('ROT47').setDescription${snip(rot47(i.options.getString('text')))}\``); break;
+        case 'atbash': e(`\`${snip(rot47(i.options.getString('text')))}\``); break;
+        case 'atbash': e.setTitle('Atbash').setDescription(`\`${snip(atbash(i.setTitle('Atbash').setDescription(`\`${snip(atbash(i.options.getString('.options.getString('text')))}\``); break;
+        case 'base64': e.setTitle('Base64').setDescription(`\`${snip(base64etext')))}\``); break;
+        case 'base64': e.setTitle('Base64').setDescription(`\`${snip(base64e(i.options.getString(i.options.getString('text')))}\``); break;
+        case 'base64d': e.setTitle('Base64 Decode').setDescription(`\`${snip('text')))}\``); break;
+        case 'base64d': e.setTitle('Base64 Decode').setDescription(`\(base64d(i.options.getString('text')))`${snip(base64d(i.options.getString('text')))}\``); break;
+        case 'reverse': e.setTitle('Reverse').}\``); break;
+        case 'reverse': e.setTitle('setDescription(`\`${snip(reverse(i.options.getString('text')))}\``); breakReverse').setDescription(`\`${snip(reverse(i.options.getString('text')))}\``); break;
+        case 'bin;
+        case 'bin': e.setTitle('Binary').setDescription(`\`${sn': e.setTitle('Binary').setDescription(`\`${snip(textToBin(i.options.getString('ip(textToBin(i.options.getString('text')))}\text')))}\``); break;
+        case 'bindecode': e``); break;
+        case 'bindecode': e.setTitle('Binary Decode').setDescription(`\`${snip(binToText(i.options.getString('binary.setTitle('Binary Decode').setDescription(`\`${snip(binToText(i.options.getString('binary')))}\')))}\``); break;
+        case 'hex': e.setTitle('Hex').setDescription(`\`${snip(textToHex(i.options.getString('text')))}\``); break;
+        case 'hexdecode': e.setTitle('Hex``); break;
+        case 'hex': e.setTitle('Hex').setDescription(`\`${snip(textToHex(i.options.getString('text')))}\``); break;
+        case 'hexdecode': e.setTitle('Hex Decode').setDescription(`\`${snip(hexToText(i.options.getString('hex')))}\``); break;
+        Decode').setDescription(`\`${snip(hexToText(i.options.getString('hex')))}\``); break;
+        case 'octal': e.setTitle('Octal').setDescription(`\`${snip(textToOctal(i.options.getString('text')))}\``); break;
+        case 'octaldecode': e.setTitle('Octal Decode').setDescription(`\`${snip(octalToText(i.options.getString('octal')))}\``); break;
+        case 'ascii': e.setTitle('ASCII').setDescription(`\`${snip(textToAscii(i.options.getString('text')))}\``); break;
+        case 'asciidecode': e.setTitle('ASCII Decode').setDescription(`\`${snip(asciiToText(i.options.getString('codes')))}\``); break;
+        case 'md5': e.setTitle('MD5').setDescription(`\`${md5(i.options.getString('text'))}\``); break;
+        case 'sha1': e.setTitle('SHA-1').setDescription(`\`${sha1(i.options.getString('text'))}\``); break;
+        case 'sha256': e.setTitle('SHA-256').setDescription(`\`${sha256(i.options.getString('text'))}\``); break;
+        case 'sha512': e.setTitle('SHA-512').setDescription(`\`${sha512(i.options.getString('text'))}\``); break;
+        case 'morse': e.setTitle('Morse').setDescription(`\`${snip(textToMorse(i.options.getString('text')))}\``); break;
+        case 'morsedecode': e.setTitle('Morse Decode').setDescription(`\`${snip(morseToText(i.options.getString('morse')))}\``); break;
+        case 'caesar': { const s = i.options.getInteger('shift') ?? 3; e.setTitle(`Caesar (shift ${s}) case 'octal': e.setTitle('Octal').setDescription(`\`${snip(textToOctal(i.options.getString('text')))}\``); break;
+        case 'octaldecode': e.setTitle('Octal Decode').setDescription(`\`${snip(octalToText(i.options.getString('octal')))}\``); break;
+        case 'ascii': e.setTitle('ASCII').setDescription(`\`${snip(textToAscii(i.options.getString('text')))}\``); break;
+        case 'asciidecode': e.setTitle('ASCII Decode').setDescription(`\`${snip(asciiToText(i.options.getString('codes')))}\``); break;
+        case 'md5': e.setTitle('MD5').setDescription(`\`${md5(i.options.getString('text'))}\``); break;
+        case 'sha1': e.setTitle('SHA-1').setDescription(`\`${sha1(i.options.getString('text'))}\``); break;
+        case 'sha256': e.setTitle('SHA-256').setDescription(`\`${sha256(i.options.getString('text'))}\``); break;
+        case 'sha512': e.setTitle('SHA-512').setDescription(`\`${sha512(i.options.getString('text'))}\``); break;
+        case 'morse': e.setTitle('Morse').setDescription(`\`${snip(textToMorse(i.options.getString('text')))}\``); break;
+        case 'morsedecode': e.setTitle('Morse Decode').setDescription(`\`${snip(morseToText(i.options.getString('morse')))}\``); break;
+        case 'caesar': { const s = i.options.getInteger('shift') ?? 3; e.setTitle(`Caesar (`).setDescription(`\`${snip(caesar(i.options.getString('text'), s))}\``); break; }
+        case 'caesarbf': e.setTitle('Caesar Brute').setDescription(`\`\`\`${snip(caesarBrute(i.options.getString('text')),1900)}\`\`\``); break;
+        case 'vigenere': e.setTitle('Vigenère Encode').setDescription(`\`${snip(vigenereEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+        case 'vigdecode': e.setTitle('Vigenère Decode').setDescription(`\`${snip(vigenereDecode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+        case 'xor': e.setTitle('XOR').setDescription(`\`${snip(xorCipher(i.options.getString('text'), i.options.getString('key')))}\``); break;
+        case 'beaufort': e.setTitle('Beaufort').setDescription(`\`${snip(beaufort(i.options.getString('text'), i.options.getString('key')))}\``); break;
+        case 'affine': e.setTitle('Affine Encode').setDescription(`\`${snip(affineEncode(i.options.getString('text'), i.options.getInteger('a'), i.options.getInteger('b')))}\``); break;
+        case 'affinedecode': e.setTitle('Affine Decode').setDescription(`\`${snip(affineDecode(i.options.getString('text'), i.options.getInteger('a'), i.options.getInteger('b')))}\``); break;
+        case 'railfence': { const r = i.options.getInteger('rails') ?? 3; e.setTitle(`Rail Fence (${r} rails)`).setDescription(`\`${snip(railFenceEncode(i.options.getString('text'), r))}\``); break; }
+        case 'railfencedecode': { const r = i.options.getInteger('rails') ?? 3; e.setTitle(`Rail Fence Decode`).setDescription(`\`${snip(railFenceDecode(i.options.getString('text'), r))}\``); break; }
+        case 'scytale': { const c = i.options.getInteger('cols') ?? 4; e.setTitle(`Scytale (${c} cols)`).setDescription(`\`${snip(scytaleEncode(i.options.getString('text'), c))}\``); break; }
+        case 'scytaledecode': { const c = i.options.getInteger('cols') ?? 4; e.setTitle(`Scytale Decode`).setDescription(`\`${snip(scytaleDecode(i.options.getString('text'), c))}\``); break; }
+        case 'columnar': e.setTitle('Columnar Encode').setDescription(`\`${snip(columnarEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+        case 'columnshift ${s})`).setDescription(`\`${snip(caesar(i.options.getString('text'), s))}\``); break; }
+        case 'caesarbf': e.setTitle('Caesar Brute').setDescription(`\`\`\`${snip(caesarBrute(i.options.getString('text')),1900)}\`\`\``); break;
+        case 'vigenere': e.setTitle('Vigenère Encode').setDescription(`\`${snip(vigenereEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+        case 'vigdecode': e.setTitle('Vigenère Decode').setDescription(`\`${snip(vigenereDecode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+        case 'xor': e.setTitle('XOR').setDescription(`\`${snip(xorCipher(i.options.getString('text'), i.options.getString('key')))}\``); break;
+        case 'beaufort': e.setTitle('Beaufort').setDescription(`\`${snip(beaufort(i.options.getString('text'), i.options.getString('key')))}\``); break;
+        case 'affine': e.setTitle('Affine Encode').setDescription(`\`${snip(affineEncode(i.options.getString('text'), i.options.getInteger('a'), i.options.getInteger('b')))}\``); break;
+        case 'affinedecode': e.setTitle('Affine Decode').setDescription(`\`${snip(affineDecode(i.options.getString('text'), i.options.getInteger('a'), i.options.getInteger('b')))}\``); break;
+        case 'railfence': { const r = i.options.getInteger('rails') ?? 3; e.setTitle(`Rail Fence (${r} rails)`).setDescription(`\`${snip(railFenceEncode(i.options.getString('text'), r))}\``); break; }
+        case 'railfencedecode': { const r = i.options.getInteger('rails') ?? 3; e.setTitle(`Rail Fence Decode`).setDescription(`\`${snip(railFenceDecode(i.options.getString('text'), r))}\``); break; }
+        case 'scytale': { const c = i.options.getInteger('cols') ?? 4; e.setTitle(`Scytale (${c} cols)`).setDescription(`\`${snip(scytaleEncode(i.options.getString('text'), c))}\``); break; }
+        case 'scytaledecode': { const c = i.options.getInteger('cols') ?? 4; e.setTitle(`Scytale Decode`).setDescription(`\`${snip(scytaleDecode(i.options.getString('text'), c))}\``); break; }
+        case 'columnar': e.setTitle('Columnar Encode').setDescription(`\`${snip(columnarEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+       ardecode': e.setTitle('Columnar Decode').setDescription(`\`${snip(columnarDecode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+        case 'polybius': e.setTitle('Polybius Encode').setDescription(`\`${snip(polybiusEncode(i.options.getString('text')))}\``); break;
+        case 'polybiusdecode': e.setTitle('Polybius Decode').setDescription(`\`${snip(polybiusDecode(i.options.getString('numbers')))}\``); break;
+        case 'baconian': e.setTitle('Baconian Encode').setDescription(`\`${snip(baconEncode(i.options.getString('text')))}\``); break;
+        case 'baconiandecode': e.setTitle('Baconian Decode').setDescription(`\`${snip(baconDecode(i.options.getString('bacon')))}\``); break;
+        case 'nato': e.setTitle('NATO').setDescription(`\`${snip(toNato(i.options.getString('text')))}\``); break;
+        case 'braille': e.setTitle('Braille').setDescription(`\`${snip(textToBraille(i.options.getString('text')))}\``); break;
+        case 't9': e.setTitle('T9').setDescription(`\`${snip(textToT9(i.options.getString('text')))}\``); break;
+        case 'phone': e.setTitle('Phone Digits').setDescription(`\`${snip(textToPhone(i.options.getString('text')))}\``); break;
+        case 'tapcode': e.setTitle('Tap Code Encode').setDescription(`\`${ case 'columnardecode': e.setTitle('Columnar Decode').setDescription(`\`${snip(columnarDecode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+        case 'polybius': e.setTitle('Polybius Encode').setDescription(`\`${snip(polybiusEncode(i.options.getString('text')))}\``); break;
+        case 'polybiusdecode': e.setTitle('Polybius Decode').setDescription(`\`${snip(polybiusDecode(i.options.getString('numbers')))}\``); break;
+        case 'baconian': e.setTitle('Baconian Encode').setDescription(`\`${snip(baconEncode(i.options.getString('text')))}\``); break;
+        case 'baconiandecode': e.setTitle('Baconian Decode').setDescription(`\`${snip(baconDecode(i.options.getString('bacon')))}\``); break;
+        case 'nato': e.setTitle('NATO').setDescription(`\`${snip(toNato(i.options.getString('text')))}\``); break;
+        case 'braille': e.setTitle('Braille').setDescription(`\`${snip(textToBraille(i.options.getString('text')))}\``); break;
+        case 't9': e.setTitle('T9').setDescription(`\`${snip(textToT9(i.options.getString('text')))}\``); break;
+        case 'phone': e.setTitle('Phone Digits').setDescription(`\`${snip(textToPhone(i.options.getString('text')))}\``); break;
+        case 'tapcode': e.setTitle('Tap Code Encode').setDescription(`\`${snip(tapCodeEncode(i.options.getString('text')))}\``); break;
+        case 'tapcodedecode': e.setTitle('Tap Code Decode').setDescription(`\`${snip(tapCodeDecode(i.options.getString('code')))}\``); break;
+        case 'urlencode': e.setTitle('URL Encode').setDescription(`\`${snip(urlEncode(i.options.getString('text')))}\``); break;
+        case 'urldecode': e.setTitle('URL Decode').setDescription(`\`${snip(urlDecode(i.options.getString('text')))}\``); break;
+        case 'htmlencode': e.setTitle('HTML Encode').snip(tapCodeEncode(i.options.getString('text')))}\``); break;
+        case 'tapcodedecode': e.setTitle('Tap Code Decode').setDescription(`\`${snip(tapCodeDecode(i.options.getString('code')))}\``); break;
+        case 'urlencode': e.setTitle('URL Encode').setDescription(`\`${snip(urlEncode(i.options.getString('text')))}\``); break;
+        case 'urldecode': e.setTitle('URL Decode').setDescription(`\`${snip(urlDecode(i.options.getString('text')))}\``); break;
+        case 'htmlencode': e.setTitle('HTML Encode').setDescription(`\setDescription(`\`${snip(htmlEncode(i.options.getString('text')))}\``); break;
+        case 'htmldecode': e.setTitle('HTML Decode').setDescription(`\`${snip(htmlDecode(i.options.getString('text')))}\``); break;
+        case 'gronsfeld': e.setTitle('Gronsfeld Encode').setDescription(`\`${snip(gronsfeldEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+        case 'gronsfelddecode': e.setTitle('Gronsfeld Decode').setDescription(`\`${snip(gronsfeldDecode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+        case 'autokey': e.setTitle('Autokey Encode').setDescription(`\`${snip(autokeyEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+
+        // ----- Placeholder for less-used commands -----
+        case 'menu':
+        case 'request_game':
+        case 'manage_requests':
+        case 'whitelist_server':
+        case 'whitelist_game':
+            e.setTitle('ℹ️ Command').setDescription(`/${i.commandName} is available but full handling not shown for brevity.`);
+            break;
+
+        default:
+            e.setTitle('ℹ️ Command').setDescription(`/${i.commandName} executed!`);
     }
 
     if (i.deferred && !i.replied) await i.editReply({ embeds: [e] });
-    else if (!i.replied) await i.reply({ embeds: [e] });
 });
+
+// ========== Missing helpers ==========
+async function getRobloxUser(username) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 6000);
+    try {
+        const res = await fetch('https://users.roblox.com/v1/usernames/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ usernames: [username]`${snip(htmlEncode(i.options.getString('text')))}\``); break;
+        case 'htmldecode': e.setTitle('HTML Decode').setDescription(`\`${snip(htmlDecode(i.options.getString('text')))}\``); break;
+        case 'gronsfeld': e.setTitle('Gronsfeld Encode').setDescription(`\`${snip(gronsfeldEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+        case 'gronsfelddecode': e.setTitle('Gronsfeld Decode').setDescription(`\`${snip(gronsfeldDecode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+        case 'autokey': e.setTitle('Autokey Encode').setDescription(`\`${snip(autokeyEncode(i.options.getString('text'), i.options.getString('key')))}\``); break;
+
+        // ----- Placeholder for less-used commands -----
+        case 'menu':
+        case 'request_game':
+        case 'manage_requests':
+        case 'whitelist_server':
+        case 'whitelist_game':
+            e.setTitle('ℹ️ Command').setDescription(`/${i.commandName} is available but full handling not shown for brevity.`);
+            break;
+
+        default:
+            e.setTitle('ℹ️ Command').setDescription(`/${i.commandName} executed!`);
+    }
+
+    if (i.deferred && !i.replied) await i.editReply({ embeds: [e] });
+});
+
+// ========== Missing helpers ==========
+async function getRobloxUser(username) {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 6000);
+    try {
+        const res = await fetch('https://users.roblox.com/v1/usernames/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ usernames: [username] }),
+            signal: ctrl.signal
+        });
+        clearTimeout(t);
+        const json = await res.json();
+        return json.data?.[0];
+    } catch (e) {
+        clearTimeout(t);
+        return null;
+    }
+}
+
+async function bruteForceRoblox(id) {
+    const endpoints = {
+        gameInfo: `https://games.roblox.com/v1/games?universeIds=${id}`,
+        userV1: `https://users.roblox.com/v1/users/${id}`,
+        groupV1: `https://groups.roblox.com/v1 }),
+            signal: ctrl.signal
+        });
+        clearTimeout(t);
+        const json = await res.json();
+        return json.data?.[0];
+    } catch (e) {
+        clearTimeout(t);
+        return null;
+    }
+}
+
+async function bruteForceRoblox(id) {
+    const endpoints = {
+        gameInfo: `https://games.roblox.com/v1/games?universeIds=${id}`,
+        userV1: `https://users.roblox.com/v1/users/${id}`,
+        groupV1: `https://groups.roblox.com/v1/groups/${id}`,
+    };
+    const results = {};
+    for (const [name, url] of Object.entries(endpoints)) {
+        try {
+            const ctrl = new AbortController();
+            const tId = setTimeout(() => ctrl.abort(), 5000);
+            const res = await fetch(url, { signal: ctrl.signal });
+            clearTimeout(tId);
+            results[name] = res.ok ? { success: true, data: await res.json() } : { success: false };
+        } catch (err) {
+            results[name] = { success: false, error: err.message };
+        }
+    }
+    return results;
+}
+
+// ============================================
+// LOGIN
+// ============================================
+const TOKEN = process.env.DISCORD_TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID;
+
+if (!TOKEN) { console.error('❌ FATAL: DISCORD_TOKEN missing!'); process.exit(1); }
+if (!CLIENT_ID) { console.error('❌ FATAL: CLIENT_ID missing!'); process.exit(1); }
 
 client.login(TOKEN);
